@@ -5,6 +5,9 @@ from typing import Tuple, Optional
 
 import numpy as np
 
+# FFT 幅值归一化常量 (因为单边FFT需要乘2来补偿负频率部分的能量)
+FFT_AMP_NORMAL_FACTOR = 2
+
 
 class OscillationDetection:
     """
@@ -96,11 +99,11 @@ class OscillationDetection:
         # 截取窗口
         windowed_data = data[-self._window_size:]
 
-
         # 执行FFT
+        fft_vals = np.fft.rfft(windowed_data)
         freqs = np.fft.rfftfreq(len(windowed_data), d=1.0 / self._sampling_rate)
         # 幅值归一化 (乘2是因为幅值在频域中被压缩了一半)
-        amplitudes = 2 * np.abs(np.fft.rfft(windowed_data)) / len(windowed_data)
+        amplitudes = FFT_AMP_NORMAL_FACTOR * np.abs(fft_vals) / len(windowed_data)
 
         # 限制频率范围
         valid_idx = np.where((freqs >= self._min_freq) & (freqs <= self._max_freq))

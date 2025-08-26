@@ -65,8 +65,6 @@ class SignalGenerator:
 
         self.logger.propagate = False
 
-
-
     def sine_wave(self,
                   freqs: Sequence[float],
                   amps: Optional[Sequence[float]] = None,

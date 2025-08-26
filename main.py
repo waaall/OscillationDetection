@@ -20,14 +20,12 @@ class ODDevFlow:
         Args:
             config_file: 配置文件路径
         """
-        # 首先设置基础日志，用于配置加载过程
-        self._setup_basic_logger()
         
         # 加载配置
         self.config = self._load_and_validate_config(config_file)
         
         # 从配置文件读取参数
-        self.csv_dir = self.config.get('csv_dir', './csv-data')
+        self.csv_file = self.config.get('csv_file', './csv-data/test.csv')
         self.window_size = self.config.get('window_size', 60)
         self.sampling_rate = self.config.get('sampling_rate', 1.0)
         self.threshold = self.config.get('threshold', 0.5)
@@ -49,14 +47,16 @@ class ODDevFlow:
         # 设置完整的日志系统
         self._setup_logger()
         
-        # 确保输出目录存在
-        os.makedirs(self.csv_dir, exist_ok=True)
+        # 确保CSV文件的目录存在
+        csv_dir = os.path.dirname(self.csv_file)
+        if csv_dir:
+            os.makedirs(csv_dir, exist_ok=True)
         
         self.logger.info("ODDevFlow 初始化完成")
         self.logger.info(f"配置参数: generate_signal={self._generate_signal}, "
-                        f"window_size={self.window_size}, sampling_rate={self.sampling_rate}")
+                        f"csv_file={self.csv_file}, window_size={self.window_size}, sampling_rate={self.sampling_rate}")
 
-    def _setup_basic_logger(self):
+    def _setup_logger(self):
         """设置基础日志系统"""
         self.logger = logging.getLogger('ODDevFlow')
         self.logger.setLevel(logging.INFO)
@@ -70,27 +70,7 @@ class ODDevFlow:
         console_formatter = logging.Formatter('[%(levelname)s] %(message)s')
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
-        
-        # 禁用传播到根logger
-        self.logger.propagate = False
 
-
-
-    def _setup_logger(self):
-        """设置完整的日志系统"""
-        self.logger = logging.getLogger('ODDevFlow')
-        self.logger.setLevel(logging.INFO)
-        
-        # 清除现有的处理器
-        self.logger.handlers.clear()
-        
-        # 创建控制台处理器
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter('[%(levelname)s] %(message)s')
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
-        
         # 创建文件处理器（如果指定了日志文件）
         if self.log_file:
             try:
@@ -135,7 +115,7 @@ class ODDevFlow:
             print(f"已自动生成配置文件: {config_file}")
             print(f"请编辑该文件设置您的参数:")
             print(f"- generate_signal: 是否生成测试信号")
-            print(f"- csv_dir: 数据文件目录")
+            print(f"- csv_file: CSV数据文件路径")
             print(f"- window_size, sampling_rate, threshold: 检测参数")
             print(f"编辑完成后重新运行程序")
             print(f"==========================================")
@@ -169,7 +149,7 @@ class ODDevFlow:
             config_file: 配置文件路径
         """
         template_config = {
-            "csv_dir": "./csv-data",
+            "csv_file": "./csv-data/test.csv",
             "window_size": 60,
             "sampling_rate": 1.0,
             "threshold": 0.5,
@@ -195,13 +175,7 @@ class ODDevFlow:
         except Exception as e:
             print(f"[ERROR] 保存配置文件模板失败: {e}")
 
-    def generate_test_signal(self) -> str:
-        """
-        根据配置参数生成测试信号
-        
-        Returns:
-            str: 生成的CSV文件路径
-        """
+    def generate_test_signal(self) -> None:
         try:
             self.logger.info("开始生成测试信号...")
             
@@ -251,20 +225,21 @@ class ODDevFlow:
                 signal += exp_signal
                 self.logger.info(f"已添加指数分量: A={self._exponential_amps}, tau={self._exponential_tau}")
             
-            # 保存到CSV文件
-            csv_file = os.path.join(self.csv_dir, "generated_signal.csv")
-            generator.insert_into_csv(
-                csv_path=csv_file,
-                column="值",
-                start_idx=0,
-                new_signal=signal,
-                isCUT=True
-            )
+            # 保存到CSV文件（使用配置指定的路径）
+            csv_file = self.csv_file
+            try:
+                generator.insert_into_csv(
+                    csv_path=csv_file,
+                    column="值",
+                    start_idx=0,
+                    new_signal=signal,
+                    isCUT=True)
+            except Exception as e:
+                self.logger.error(f"保存信号到CSV文件失败: {e}")
+                raise
             
             self.logger.info(f"测试信号已生成并保存到: {csv_file}")
             self.logger.info(f"信号长度: {len(signal)} 点, 持续时间: {self._generate_duration} 秒")
-            
-            return csv_file
             
         except Exception as e:
             self.logger.error(f"生成测试信号失败: {e}")
@@ -326,28 +301,24 @@ class ODDevFlow:
             self.logger.info("="*50)
             self.logger.info("开始振荡检测开发流程")
             self.logger.info("="*50)
-            
-            # 步骤1: 决定使用的CSV文件
+                
+            # 检查文件是否存在
+            csv_file = self.csv_file
+            if not os.path.exists(csv_file) and not self._generate_signal:
+                self.logger.error(f"指定的CSV文件不存在")
+                raise FileNotFoundError(f"在 {csv_file} 目录中找不到CSV数据文件")
+
+            # 如果配置该选项, 生成测试信号
             if self._generate_signal:
                 self.logger.info("配置指定生成测试信号")
-                csv_file = self.generate_test_signal()
-            else:
-                self.logger.info("配置指定使用现有数据文件")
-                csv_file = os.path.join(self.csv_dir, "data.csv")
-                
-                # 检查文件是否存在
-                if not os.path.exists(csv_file):
-                    available_files = [f for f in os.listdir(self.csv_dir) 
-                                     if f.endswith('.csv')] if os.path.exists(self.csv_dir) else []
-                    if available_files:
-                        csv_file = os.path.join(self.csv_dir, available_files[0])
-                        self.logger.info(f"data.csv不存在，使用: {csv_file}")
-                    else:
-                        raise FileNotFoundError(f"在 {self.csv_dir} 目录中找不到CSV数据文件")
-            
-            # 步骤2: 运行振荡检测测试
+                try:
+                    self.generate_test_signal()
+                except Exception as e:
+                    self.logger.error(f"生成测试信号失败: {e}")
+
+            # 运行振荡检测测试
             results = self.run_oscillation_detection(csv_file, mode=mode)
-            
+
             if results is not None:
                 # 输出静态分析结果
                 self.logger.info("="*30 + " 检测结果 " + "="*30)

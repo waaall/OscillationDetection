@@ -7,6 +7,9 @@ import os
 from typing import Optional
 from OscillationDetection import OscillationDetection
 
+# FFT 幅值归一化常量 (因为单边FFT需要乘2来补偿负频率部分的能量)
+FFT_AMP_NORMAL_FACTOR = 2
+
 
 class OscillationDetectionTester:
     def __init__(self, csv_file: str, window_size: int = 1000, overlap_ratio: float = 0.5,
@@ -215,7 +218,8 @@ class OscillationDetectionTester:
             try:
                 fft_vals = np.fft.rfft(window_data)
                 fft_freqs = np.fft.rfftfreq(len(window_data), d=1.0 / self.sampling_rate)
-                amplitudes = np.abs(fft_vals) / len(window_data)
+                # 幅值归一化 (单边FFT需要乘以归一化因子来补偿负频率部分的能量)
+                amplitudes = FFT_AMP_NORMAL_FACTOR * np.abs(fft_vals) / len(window_data)
 
                 # 频率范围过滤
                 valid_idx = np.where((fft_freqs >= self.min_freq) & (fft_freqs <= self.max_freq))
