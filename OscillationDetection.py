@@ -23,6 +23,16 @@ class OscillationDetection:
         :param plot_comparison: 是否绘制对比图
         :param log_file: 日志文件路径（如果为 None，则只输出到控制台）
         """
+        # 检查窗口大小
+        if not isinstance(window_size, int) or window_size <= 0:
+            raise ValueError("window_size 必须是正整数")
+        # 检查采样率
+        if not isinstance(sampling_rate, (int, float)) or sampling_rate <= 0:
+            raise ValueError("sampling_rate 必须是正数")
+        # 检查阈值
+        if not isinstance(threshold, (int, float)) or threshold < 0:
+            raise ValueError("threshold 必须是非负数")
+
         self._window_size = window_size
         self._sampling_rate = sampling_rate
         self._threshold = threshold
@@ -159,7 +169,7 @@ class OscillationDetection:
         self.logger.info(f"对比图已保存: {save_path}")
 
 
-def test():
+def simple_test():
     # 构造一个 50Hz 正弦波
     fs = 1000
     t = np.arange(0, 1.0, 1/fs)
@@ -179,4 +189,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    simple_test()
