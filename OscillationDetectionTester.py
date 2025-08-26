@@ -11,7 +11,7 @@ from OscillationDetection import OscillationDetection
 class OscillationDetectionTester:
     def __init__(self, csv_file: str, window_size: int = 1000, overlap_ratio: float = 0.5,
                  sampling_rate: float = 1000, threshold: float = 0.3, col_name: str = "值",
-                 log_file: Optional[str] = "oscillation_tester.log"):
+                 log_file: Optional[str] = "./log/oscillation_tester.log"):
         """
         :param csv_file: CSV 文件路径，假设有一列 'signal'
         :param window_size: 窗口大小 (点数)
@@ -38,8 +38,9 @@ class OscillationDetectionTester:
         # 初始化检测器
         self.detector = OscillationDetection(window_size=window_size,
                                              sampling_rate=sampling_rate,
-                                             threshold=threshold)
-        
+                                             threshold=threshold,
+                                             log_file=log_file)
+
         # 获取频率范围
         self.min_freq = self.detector._min_freq
         self.max_freq = self.detector._max_freq
@@ -82,7 +83,7 @@ class OscillationDetectionTester:
                 self.logger.warning(f"无法创建日志文件 {log_file}: {e}")
 
     def _validate_parameters(self, csv_file: str, window_size: int, overlap_ratio: float, 
-                           sampling_rate: float, threshold: float, col_name: str):
+                             sampling_rate: float, threshold: float, col_name: str):
         """参数验证"""
         # 检查CSV文件
         if not os.path.exists(csv_file):
@@ -164,7 +165,7 @@ class OscillationDetectionTester:
             self.trigger_text = self.ax1.text(0.02, 0.9, "", transform=self.ax1.transAxes,
                                               fontsize=12, color="red", weight="bold",
                                               bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
-            
+
             plt.tight_layout()
             self.logger.info("画布设置完成")
             
@@ -347,12 +348,11 @@ class OscillationDetectionTester:
 def basic_test():
     try:
         tester = OscillationDetectionTester(
-            csv_file="test.csv",
-            window_size=60,
-            overlap_ratio=0.1,
-            sampling_rate=1,
-            threshold=10.0,
-            log_file="oscillation_tester.log"
+            csv_file="data.csv",
+            window_size=100,
+            overlap_ratio=0.2,
+            sampling_rate=1000,
+            threshold=5.0
         )
 
         # 可以选择运行动画或静态分析

@@ -127,6 +127,7 @@ class OscillationDetection:
             self.logger.info(f"检测到振荡: 频率={peak_freq:.2f}Hz, 幅值={peak_amp:.4f}")
             return True, peak_freq, peak_amp
         else:
+            self.logger.debug(f"没有检测到振荡: 频率{peak_freq:.2f}Hz, 最大幅值{peak_amp:.4f}")
             return False, None, None
 
     def __plot_comparison(self, original_data: np.ndarray,
