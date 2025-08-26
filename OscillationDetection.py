@@ -35,7 +35,10 @@ class OscillationDetection:
     def _set_up_frequency(self):
         nyquist_freq = self._sampling_rate / 2.0
         self._max_freq = min(nyquist_freq * 0.95, 500)  # 留 5% 余量，不超过 500Hz
-        self._min_freq = 1.0 / (self._window_size / self._sampling_rate)
+        self._min_freq = (1.0 / (self._window_size / self._sampling_rate)) * 2
+        if self._min_freq >= self._max_freq:
+            self.logger.error("最小频率 >= 最大频率, 请检查参数设置")
+            return
 
         self.logger.info("OscillationDetection 初始化完成: "
                          f"window_size={self._window_size}, sampling_rate={self._sampling_rate}, "
@@ -130,23 +133,23 @@ class OscillationDetection:
 
         time = np.arange(len(original_data)) / self._sampling_rate
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+        fig, ax = plt.subplots(2, 1, figsize=(12, 8))
 
         # 时域信号
-        ax1.plot(time, original_data)
-        ax1.set_title("Original Signal")
-        ax1.set_xlabel("Time (s)")
-        ax1.set_ylabel("Amplitude")
-        ax1.grid(True)
-        ax1.set_xlim(0, time[-1])
+        ax[0].plot(time, original_data, '#369a62')
+        ax[0].set_title("Original Signal")
+        ax[0].set_xlabel("Time (s)")
+        ax[0].set_ylabel("Amplitude")
+        ax[0].grid(True)
+        ax[0].set_xlim(time[0], time[-1])
 
         # 频域信号
-        ax2.plot(freqs, amplitudes, 'r-')
-        ax2.set_title("Frequency Domain (FFT)")
-        ax2.set_xlabel("Frequency (Hz)")
-        ax2.set_ylabel("Amplitude")
-        ax2.grid(True)
-        ax2.set_xlim(self._min_freq, self._max_freq)
+        ax[1].plot(freqs, amplitudes, '#844784')
+        ax[1].set_title("Frequency Domain (FFT)")
+        ax[1].set_xlabel("Frequency (Hz)")
+        ax[1].set_ylabel("Amplitude")
+        ax[1].grid(True)
+        ax[1].set_xlim(self._min_freq, self._max_freq)
 
         plt.tight_layout()
         save_path = os.path.join(output_dir, "comparison.png")
