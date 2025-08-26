@@ -28,7 +28,8 @@ class ODDevFlow:
         self.csv_file = self.config.get('csv_file', './csv-data/test.csv')
         self.window_size = self.config.get('window_size', 60)
         self.sampling_rate = self.config.get('sampling_rate', 1.0)
-        self.threshold = self.config.get('threshold', 0.5)
+        self._threshold = self.config.get('threshold', 0.5)
+        self._overlap_ratio = self.config.get('overlap_ratio', 0.5)
         self.log_file = self.config.get('log_file', None)
 
         # 信号生成相关参数
@@ -153,6 +154,7 @@ class ODDevFlow:
             "window_size": 60,
             "sampling_rate": 1.0,
             "threshold": 0.5,
+            "overlap_ratio": 0.1,
             "log_file": None,
             "generate_signal": False,
             "generate_duration": 10,
@@ -259,15 +261,15 @@ class ODDevFlow:
         try:
             self.logger.info(f"开始振荡检测测试: {csv_file}")
             self.logger.info(f"检测参数: window_size={self.window_size}, "
-                           f"sampling_rate={self.sampling_rate}, threshold={self.threshold}")
+                           f"sampling_rate={self.sampling_rate}, threshold={self._threshold}")
             
             # 创建检测器
             tester = OscillationDetectionTester(
                 csv_file=csv_file,
                 window_size=self.window_size,
-                overlap_ratio=0.5,  # 50%重叠
+                overlap_ratio=self._overlap_ratio,
                 sampling_rate=self.sampling_rate,
-                threshold=self.threshold,
+                threshold=self._threshold,
                 col_name="值",
                 log_file=self.log_file
             )
