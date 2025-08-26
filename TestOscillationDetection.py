@@ -240,7 +240,7 @@ class OscillationDetectionTester:
             try:
                 is_trigger, peak_freq, peak_amp = self.detector.detect(window_data)
                 if is_trigger:
-                    self.trigger_text.set_text(f"Detected Oscillation!\nFrequency: {peak_freq:.2f}Hz\nAmplitude: {peak_amp:.3f}")
+                    self.trigger_text.set_text(f"Detected Oscillation!\nFrequency: {peak_freq:.2f}Hz; Amplitude: {peak_amp:.3f}")
                     self.trigger_text.set_color("red")
                     self.logger.info(f"窗口 {frame_idx}: 检测到振荡 - 频率={peak_freq:.2f}Hz, 幅值={peak_amp:.3f}")
                 else:
