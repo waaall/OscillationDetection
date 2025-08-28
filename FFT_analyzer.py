@@ -118,7 +118,7 @@ class FFTAnalyzer:
     def fft_analyze(self, signal_data: np.ndarray, PLOT_path: str = None, use_window: bool = False,
                     IpDFT: bool = True) -> Tuple[bool, Optional[float], Optional[float], Optional[float]]:
         """
-        FFT分析函数，支持PMU相量测量（频率、幅值、相位角）
+        FFT分析函数，支持相量测量（频率、幅值、相位角）
         
         :param signal_data: 输入信号数据
         :param PLOT_path: 绘图保存路径
@@ -183,7 +183,7 @@ class FFTAnalyzer:
                 self.logger.error(f"绘图失败: {e}")
 
         # 日志输出
-        self.logger.info(f"PMU检测到信号: 频率={peak_freq:.4f}Hz, 幅值={peak_amp:.4f}, "
+        self.logger.info(f"检测到信号: 频率={peak_freq:.4f}Hz, 幅值={peak_amp:.4f}, "
                        f"相位={np.degrees(peak_phase):.2f}°")
 
         return True, peak_freq, peak_amp, peak_phase
@@ -259,13 +259,19 @@ class FFTAnalyzer:
 
 
 def simple_test():
+    sampling_rate = 10000
     tester = FFTAnalyzer(window_size=600,
-                     sampling_rate=10000,
+                     sampling_rate=sampling_rate,
                      log_file="./log/testfft.log")
 
     # 生成测试信号
     signal = tester.generate_test_signal(duration_s=2.0, fundamental_freq=50.02)
-    signal = signal[5456:]
+    generator = SignalGenerator(sampling_rate=sampling_rate)
+    signal = generator.trim_signal(
+        signal,
+        frequency=50.0,
+        phase_angle=np.pi/6
+    )
 
     print("========= 不加窗 =========")
     success, freq, amp, phase = tester.fft_analyze(signal, PLOT_path="./plots/no_window_dft.png", use_window=False, IpDFT=False)

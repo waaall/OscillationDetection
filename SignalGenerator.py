@@ -220,6 +220,54 @@ class SignalGenerator:
         self.logger.info(f"信号已写入 {save_path}, 列: {column}, 模式: {'替换' if isCUT else '追加'}")
         return df
 
+    def trim_signal(self, signal: np.ndarray, 
+                    n_points: int = 0,
+                    frequency: Optional[float] = None,
+                    phase_angle: Optional[float] = None,
+                    from_end: bool = True) -> np.ndarray:
+        """
+        裁剪信号的数据点
+        
+        :param signal: 输入信号
+        :param n_points: 要裁剪掉的数据点数量
+        :param frequency: 给定频率(Hz), 用于计算基于周期的裁剪点
+        :param phase_angle: 给定相位角度(弧度), 用于精确定位裁剪点
+        :param from_end: True=从后面裁剪(默认), False=从前面裁剪
+        :return: 裁剪后的信号
+        """
+        if len(signal) == 0:
+            raise ValueError("输入信号不能为空")
+            
+        # 计算要裁剪的点数
+        if frequency is not None and phase_angle is not None:
+            # 基于频率和相位角度计算裁剪点数
+            period_samples = int(self._sampling_rate / frequency)
+            phase_offset = int((phase_angle / (2 * np.pi)) * period_samples)
+            
+            # 简单地使用相位偏移作为裁剪点数
+            points_to_trim = phase_offset
+            
+            self.logger.info(f"基于频率{frequency}Hz和相位{phase_angle}弧度计算裁剪点数: {points_to_trim}")
+        else:
+            # 使用指定的点数
+            points_to_trim = n_points
+            
+        # 执行裁剪
+        if points_to_trim >= len(signal):
+            raise ValueError("裁剪的点数不能大于等于信号长度")
+            
+        if points_to_trim <= 0:
+            trimmed_signal = signal.copy()
+        else:
+            if from_end:
+                trimmed_signal = signal[:-points_to_trim]
+                self.logger.info(f"从信号后面裁剪 {points_to_trim} 个数据点")
+            else:
+                trimmed_signal = signal[points_to_trim:]
+                self.logger.info(f"从信号前面裁剪 {points_to_trim} 个数据点")
+            
+        return trimmed_signal
+
     def _add_noise(self, signal: np.ndarray) -> np.ndarray:
         """添加噪声"""
         if self._noise_level > 0:
@@ -239,9 +287,12 @@ def test():
 
     sig = sig_sins + sig_linear + sig_polynomial + sig_exponential
 
-    gen.insert_into_csv("data.csv", column="值", start_idx=100,
-                        new_signal=sig, isCUT=True)
+    # 基于频率和相位角度从后面裁剪
+    trimmed_sig = gen.trim_signal(sig, frequency=50.0, phase_angle=np.pi/4, from_end=True)
+    print(f"基于频率50Hz和相位π/4从后面裁剪后长度: {len(trimmed_sig)}")
 
+    gen.insert_into_csv("./test_data.csv", column="值", start_idx=100,
+                        new_signal=trimmed_sig, isCUT=True)
 
 if __name__ == "__main__":
     test()
