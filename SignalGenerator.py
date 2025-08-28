@@ -9,7 +9,7 @@ import pandas as pd
 class SignalGenerator:
     def __init__(self,
                  sampling_rate: int = 1000,
-                 duration: float = 1.0,
+                 duration: float = 10.0,
                  noise_level: float = 0.0,
                  seed: Optional[int] = None,
                  log_file: Optional[str] = None):
