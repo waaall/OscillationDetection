@@ -1,7 +1,7 @@
 import os
 import sys
 import logging
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 import numpy as np
 import pandas as pd
 
@@ -19,8 +19,8 @@ class SignalGenerator:
         :param fs: 采样率 (Hz)
         :param duration: 信号持续时间 (s)
         :param noise_level: 噪声强度 (0~1 比例)
-        :param seed: 随机种子（保证可重复性）
-        :param log_file: 日志文件路径（可选）
+        :param seed: 随机种子(保证可重复性)
+        :param log_file: 日志文件路径(可选)
         """
         if sampling_rate <= 0 or duration <= 0:
             raise ValueError("fs 和 duration 必须为正数")
@@ -54,7 +54,7 @@ class SignalGenerator:
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
 
-        # 文件处理器（可选）
+        # 文件处理器(可选)
         if log_file is not None:
             file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
             file_handler.setLevel(logging.INFO)
@@ -83,6 +83,76 @@ class SignalGenerator:
 
         self.logger.info(f"生成正弦波: freqs={freqs}, amps={amps}, phases={phases}")
         return self._add_noise(signal)
+
+    def harmonic_wave(self,
+                      fundamental_freq: float = 50.0,  # 默认电网频率50Hz
+                      num_harmonics: int = 5,          # 包括基波, 通常分析到5次谐波
+                      amps: Optional[Union[Sequence[float], str]] = 'typical',
+                      phases: Optional[Sequence[float]] = None) -> np.ndarray:
+        """
+        生成包含谐波的信号, 特别针对电网信号优化
+        
+        :param fundamental_freq: 基频 (Hz), 默认50Hz(电网频率)
+        :param num_harmonics: 谐波数量(包括基波), 默认5次
+        :param amps: 各谐波幅度, 可以是数组或字符串:
+                    'typical' = 典型电网谐波幅度 (默认)
+                    'linear' = 线性衰减
+                    'exponential' = 指数衰减
+        :param phases: 各谐波相位(弧度)
+        """
+        if fundamental_freq <= 0:
+            raise ValueError("fundamental_freq 必须为正数")
+        if num_harmonics < 1:
+            raise ValueError("num_harmonics 必须至少为1")
+            
+        # 生成谐波频率
+        freqs = [fundamental_freq * (i + 1) for i in range(num_harmonics)]
+        
+        # 处理幅度参数
+        if amps is None or amps == 'typical':
+            # 典型电网谐波幅度 基波=1.0, 奇次谐波幅度较大, 偶次谐波幅度较小
+            typical_amps = {
+                1: 1.00,   # 基波
+                2: 0.02,   # 2次谐波
+                3: 0.04,   # 3次谐波
+                4: 0.01,   # 4次谐波
+                5: 0.03,   # 5次谐波
+            }
+            
+            amps = []
+            for i in range(1, num_harmonics + 1):
+                if i in typical_amps:
+                    amps.append(typical_amps[i])
+                else:
+                    # 对于更高次谐波, 使用近似衰减公式
+                    amps.append(0.01 / (i/13)**2)
+                    
+        elif isinstance(amps, str):
+            if amps == 'linear':
+                amps = [1.0 - i * 0.1 for i in range(num_harmonics)]
+                amps = [max(0, a) for a in amps]  # 确保非负
+            elif amps == 'exponential':
+                amps = [np.exp(-i * 0.5) for i in range(num_harmonics)]
+            else:
+                raise ValueError("amps 字符串参数只能是 'typical', 'linear' 或 'exponential'")
+        elif len(amps) != num_harmonics:
+            raise ValueError("amps 长度必须与 num_harmonics 一致")
+            
+        # 处理相位参数
+        if phases is None:
+            # 设置典型相位关系：奇次谐波相位接近0, 偶次谐波相位接近π/2
+            phases = []
+            for i in range(1, num_harmonics + 1):
+                if i % 2 == 1:  # 奇次谐波
+                    phases.append(0)
+                else:  # 偶次谐波
+                    phases.append(np.pi/2)
+        elif len(phases) != num_harmonics:
+            raise ValueError("phases 长度必须与 num_harmonics 一致")
+            
+        self.logger.info(f"生成电网谐波: 基频={fundamental_freq}Hz, 谐波数={num_harmonics}")
+        
+        return self.sine_wave(freqs, amps, phases)
 
     def linear(self, slope: float = 1.0, intercept: float = 0.0) -> np.ndarray:
         """生成直线 y = slope*t + intercept"""
@@ -117,7 +187,7 @@ class SignalGenerator:
         :param start_idx: 插入位置索引
         :param new_signal: 新信号 (numpy 数组)
         :param isCUT: True=替换, False=追加
-        :param save_path: 保存路径（如果 None, 则覆盖原文件）
+        :param save_path: 保存路径(如果 None, 则覆盖原文件)
         """
         if new_signal is None or len(new_signal) == 0:
             raise ValueError("new_signal 不能为空")

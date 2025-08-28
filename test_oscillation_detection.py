@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from SignalGenerator import SignalGenerator
-from TestOscillationDetection import OscillationDetectionTester
+from OscillationDetection import OscillationDetection
 
 
 class ODDevFlow:
@@ -264,7 +264,7 @@ class ODDevFlow:
                            f"sampling_rate={self.sampling_rate}, threshold={self._threshold}")
             
             # 创建检测器
-            tester = OscillationDetectionTester(
+            tester = OscillationDetection(
                 csv_file=csv_file,
                 window_size=self.window_size,
                 overlap_ratio=self._overlap_ratio,
