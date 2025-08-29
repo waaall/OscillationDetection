@@ -63,7 +63,7 @@ class SignalGenerator:
             file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
 
-        self.logger.propagate = False
+        self.logger.propagate = True
 
     def sine_wave(self,
                   freqs: Sequence[float],

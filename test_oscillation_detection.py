@@ -91,7 +91,7 @@ class ODDevFlow:
                 self.logger.warning(f"无法创建日志文件 {self.log_file}: {e}")
         
         # 禁用传播到根logger
-        self.logger.propagate = False
+        self.logger.propagate = True
 
     def _load_and_validate_config(self, config_file: str) -> dict:
         """

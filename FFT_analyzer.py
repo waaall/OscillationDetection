@@ -1,7 +1,7 @@
 import os
 import sys
 import logging
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional
 import numpy as np
 
 from SignalGenerator import SignalGenerator
@@ -77,7 +77,7 @@ class FFTAnalyzer:
             file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
 
-        self.logger.propagate = False
+        self.logger.propagate = True
 
     def generate_test_signal(self,
                              duration_s: float = None,
@@ -184,7 +184,7 @@ class FFTAnalyzer:
 
         # 日志输出
         self.logger.info(f"检测到信号: 频率={peak_freq:.4f}Hz, 幅值={peak_amp:.4f}, "
-                       f"相位={np.degrees(peak_phase):.2f}°")
+                         f"相位={np.degrees(peak_phase):.2f}°")
 
         return True, peak_freq, peak_amp, peak_phase
 
@@ -223,33 +223,68 @@ class FFTAnalyzer:
         ax[0].set_ylabel("Amplitude")
         ax[0].grid(True)
 
-        ax[1].plot(freqs, fft_amps, '#844784')
+        # 先画细浅的曲线
+        ax[1].plot(freqs, fft_amps, '-', color='#844784', linewidth=1, alpha=0.3)
+        # 再画明显的数据点
+        ax[1].plot(freqs, fft_amps, 'o', color='#844784', markersize=6, 
+                   markeredgewidth=1, markeredgecolor='black', alpha=0.8)
+        
+        # 设置频率绘图范围
+        freq_plot_range = 100  # 可以调整这个值来改变绘图范围
+        freq_plot_min = peak_freq - freq_plot_range/2 if peak_freq else self._min_freq
+        freq_plot_max = peak_freq + freq_plot_range/2 if peak_freq else self._max_freq
+        
+        # 确保绘图范围不超出有效频率范围
+        freq_plot_min = max(freq_plot_min, self._min_freq)
+        freq_plot_max = min(freq_plot_max, self._max_freq)
+        
+        # 根据绘图范围内的点数量来决定标签密度
+        plot_range_mask = (freqs >= freq_plot_min) & (freqs <= freq_plot_max)
+        
+        # 只为峰值频率点及其左右各3个点添加标签（总共7个点）
+        if peak_freq is not None:
+            # 找到峰值频率在freqs数组中的索引
+            peak_freq_idx = np.argmin(np.abs(freqs - peak_freq))
+            
+            # 定义要标记的点的索引范围
+            label_indices = range(max(0, peak_freq_idx - 3), 
+                                min(len(freqs), peak_freq_idx + 4))
+            
+            # 在每个指定点旁边添加数据标签（只有在绘图范围内的才显示）
+            for i in label_indices:
+                if plot_range_mask[i]:
+                    freq, amp = freqs[i], fft_amps[i]
+                    ax[1].annotate(f'({freq:.1f}, {amp:.3f})', 
+                                  (freq, amp), 
+                                  xytext=(5, 5), 
+                                  textcoords='offset points',
+                                  fontsize=8, 
+                                  alpha=0.7)
+        
         ax[1].set_title("Frequency Domain (FFT)")
         
         # 在右上角添加参数信息
         info_text = (f"Δf={self._frequency_resolution:.4f}Hz\n"
-                    f"Precision≈±{self._freq_precision:.4f}Hz")
-        
-        # 添加相位信息
-        if peak_phase is not None:
-            info_text += f"\nPhase={np.degrees(peak_phase):.1f}°"
+                    f"Precision≈±{self._freq_precision:.4f}Hz"
+                    f"\nPhase={np.degrees(peak_phase):.1f}°")
             
-        ax[1].text(0.98, 0.98, info_text, transform=ax[1].transAxes,
+        ax[1].text(0.99, 0.96, info_text, transform=ax[1].transAxes,
                   fontsize=10, verticalalignment='top', horizontalalignment='right',
                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
         
         # 标记峰值点
         if peak_freq is not None and peak_amp is not None:
-            label_text = f'Peak: {peak_freq:.2f}Hz, {peak_amp:.4f}'
-            if peak_phase is not None:
-                label_text += f', {np.degrees(peak_phase):.1f}°'
-            ax[1].plot(peak_freq, peak_amp, 'ro', markersize=8, label=label_text)
+            label_text = f'Estimated Peak: ({peak_freq:.3f}Hz, {peak_amp:.4f})'
+            ax[1].plot(peak_freq, peak_amp, 'o', markersize=10, 
+                      markerfacecolor='none', markeredgecolor='red', 
+                      markeredgewidth=2, label=label_text)
             ax[1].legend()
         
         ax[1].set_xlabel("Frequency (Hz)")
         ax[1].set_ylabel("Amplitude")
         ax[1].grid(True)
-        ax[1].set_xlim(self._min_freq, self._max_freq)
+        # 使用动态计算的频率范围
+        ax[1].set_xlim(freq_plot_min, freq_plot_max)
 
         plt.tight_layout()
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
@@ -258,32 +293,39 @@ class FFTAnalyzer:
         self.logger.info(f"对比图已保存: {save_path}")
 
 
-def simple_test():
-    sampling_rate = 10000
-    tester = FFTAnalyzer(window_size=600,
-                     sampling_rate=sampling_rate,
-                     log_file="./log/testfft.log")
+def simple_test(sampling_rate:int=4000,
+                frequency:float=50.02,
+                window_Ts:int=4):
+
+    window_size = int(sampling_rate / 50 * window_Ts)
+    tester = FFTAnalyzer(window_size=window_size,
+                         sampling_rate=sampling_rate,
+                         log_file="./log/testfft.log")
 
     # 生成测试信号
-    signal = tester.generate_test_signal(duration_s=2.0, fundamental_freq=50.02)
+    signal = tester.generate_test_signal(duration_s=2.0,
+                                         fundamental_freq=frequency)
     generator = SignalGenerator(sampling_rate=sampling_rate)
     signal = generator.trim_signal(
         signal,
-        frequency=50.0,
+        frequency=frequency,
         phase_angle=np.pi/6
     )
 
-    print("========= 不加窗 =========")
-    success, freq, amp, phase = tester.fft_analyze(signal, PLOT_path="./plots/no_window_dft.png", use_window=False, IpDFT=False)
-    print(f"结果: success={success}, freq={freq:.4f}Hz, amp={amp:.4f}, phase={np.degrees(phase):.2f}°")
+    print("\n========= 不加窗 =========")
+    success, freq, amp, phase = tester.fft_analyze(signal, use_window=False, IpDFT=False,
+                                                   PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}no_window_dft.png")
+    print(f"no_window_dft: success={success}, freq={freq:.4f}Hz, amp={amp:.4f}, phase={np.degrees(phase):.2f}°")
 
     print("\n========= 加窗 =========")
-    success, freq2, amp2, phase2 = tester.fft_analyze(signal, PLOT_path="./plots/window_dft.png", use_window=True, IpDFT=False)
-    print(f"结果: success={success}, freq={freq2:.4f}Hz, amp={amp2:.4f}, phase={np.degrees(phase2):.2f}°")
+    success, freq2, amp2, phase2 = tester.fft_analyze(signal, use_window=True, IpDFT=False,
+                                                      PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}window_dft.png")
+    print(f"window_dft: success={success}, freq={freq2:.4f}Hz, amp={amp2:.4f}, phase={np.degrees(phase2):.2f}°")
 
     print("\n========= 加窗&IpDFT =========")
-    success, freq3, amp3, phase3 = tester.fft_analyze(signal, PLOT_path="./plots/window_ipdft.png", use_window=True, IpDFT=True)
-    print(f"结果: success={success}, freq={freq3:.4f}Hz, amp={amp3:.4f}, phase={np.degrees(phase3):.2f}°")
+    success, freq3, amp3, phase3 = tester.fft_analyze(signal, use_window=True, IpDFT=True,
+                                                      PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}window_ipdft.png")
+    print(f"window_ipdft: success={success}, freq={freq3:.4f}Hz, amp={amp3:.4f}, phase={np.degrees(phase3):.2f}°")
 
 if __name__ == "__main__":
     simple_test()
