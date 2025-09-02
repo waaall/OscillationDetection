@@ -5,7 +5,7 @@ import matplotlib.animation as animation
 import logging
 import os
 from typing import Optional
-from FFT_analyzer import OscillationDetection
+from FFT_analyzer import FFTAnalyzer
 
 # FFT 幅值归一化常量 (因为单边FFT需要乘2来补偿负频率部分的能量;直流分量和奈奎斯特频率,不应该乘)
 FFT_AMP_NORMAL_FACTOR = 2
@@ -39,9 +39,8 @@ class OscillationDetection:
         self.sampling_rate = sampling_rate
         
         # 初始化检测器
-        self.detector = OscillationDetection(window_size=window_size,
+        self.detector = FFTAnalyzer(window_size=window_size,
                                              sampling_rate=sampling_rate,
-                                             threshold=threshold,
                                              log_file=log_file)
 
         # 获取频率范围

@@ -295,22 +295,25 @@ class FFTAnalyzer:
 
 def simple_test(sampling_rate:int=4000,
                 frequency:float=50.02,
-                window_Ts:int=4):
-
+                window_Ts:int=8):
+    duration_s = 2.0
     window_size = int(sampling_rate / 50 * window_Ts)
     tester = FFTAnalyzer(window_size=window_size,
                          sampling_rate=sampling_rate,
                          log_file="./log/testfft.log")
 
     # 生成测试信号
-    signal = tester.generate_test_signal(duration_s=2.0,
+    signal = tester.generate_test_signal(duration_s=duration_s,
                                          fundamental_freq=frequency)
-    generator = SignalGenerator(sampling_rate=sampling_rate)
-    signal = generator.trim_signal(
-        signal,
-        frequency=frequency,
-        phase_angle=np.pi/6
-    )
+    generator = SignalGenerator(sampling_rate=sampling_rate,
+                                duration=duration_s)
+    sin_signal = generator.sine_wave(freqs=[10], amps=[0.05])
+    # signal = generator.trim_signal(
+    #     signal,
+    #     frequency=frequency,
+    #     phase_angle=np.pi/6
+    # )
+    signal = signal + sin_signal
 
     print("\n========= 不加窗 =========")
     success, freq, amp, phase = tester.fft_analyze(signal, use_window=False, IpDFT=False,
