@@ -37,7 +37,7 @@ class OscillationDetection:
         self.window_size = window_size
         self.step_size = int(window_size * (1 - overlap_ratio))
         self.sampling_rate = sampling_rate
-        
+        self.threshold = threshold
         # 初始化检测器
         self.detector = FFTAnalyzer(window_size=window_size,
                                              sampling_rate=sampling_rate,
@@ -241,14 +241,15 @@ class OscillationDetection:
 
             # --------- 振荡检测 ---------
             try:
-                is_trigger, peak_freq, peak_amp = self.detector.detect(window_data)
-                if is_trigger:
-                    self.trigger_text.set_text(f"Detected Oscillation!\nFrequency: {peak_freq:.2f}Hz; Amplitude: {peak_amp:.3f}")
-                    self.trigger_text.set_color("red")
-                    self.logger.info(f"窗口 {frame_idx}: 检测到振荡 - 频率={peak_freq:.2f}Hz, 幅值={peak_amp:.3f}")
-                else:
-                    self.trigger_text.set_text("Normal")
-                    self.trigger_text.set_color("green")
+                result, peak_freq, peak_amp, __ = self.detector.fft_analyze(window_data)
+                if result:
+                    if peak_freq >= self.threshold:
+                        self.trigger_text.set_text(f"Detected Oscillation!\nFrequency: {peak_freq:.2f}Hz; Amplitude: {peak_amp:.3f}")
+                        self.trigger_text.set_color("red")
+                        self.logger.info(f"窗口 {frame_idx}: 检测到振荡 - 频率={peak_freq:.2f}Hz, 幅值={peak_amp:.3f}")
+                    else:
+                        self.trigger_text.set_text("Normal")
+                        self.trigger_text.set_color("green")
                     
             except Exception as e:
                 self.logger.error(f"振荡检测失败 (窗口 {frame_idx}): {e}")
