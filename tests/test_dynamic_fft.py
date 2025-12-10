@@ -7,7 +7,7 @@
 from pathlib import Path
 from datetime import datetime
 import sys
-import numpy as np
+import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -125,6 +125,54 @@ def example4_backward_compatibility():
     print(f"✓ 同时保留 signal_data (向后兼容): {type(gen_new.signal_data[0])}")
 
 
+def example5_zero_crossing_mode():
+    """示例5：使用过零检测进行动态频率估计"""
+    print("\n" + "=" * 60)
+    print("示例5：过零检测频率分析")
+    print("=" * 60)
+
+    sampling_rate = 2000
+    target_freq = 50.2
+    generator = SignalGenerator(
+        sampling_rate=sampling_rate,
+        duration=1.0,
+        noise_level=0.0,
+        start_time=datetime(2025, 12, 10, 10, 0, 0)
+    )
+    signal = generator.sine_wave(freqs=[target_freq], amps=[1.0])
+
+    df = pd.DataFrame({
+        "timestamp": generator.timestamps,
+        "signal": signal
+    })
+
+    analyzer = FFTDynamicAnalyzer(
+        window_duration_ms=200,
+        step_duration_ms=100,
+        sampling_rate=sampling_rate,
+        freq_range=(49.5, 50.5),
+        use_zero_crossing=True,
+        zero_cross_config={
+            "window_periods": 4,
+            "min_freq_hz": 45.0,
+            "max_freq_hz": 65.0,
+            "min_cross_amplitude": 0.05
+        },
+        use_window=False,
+        use_ipdft=False,
+        refine_frequency=False
+    )
+
+    results_df = analyzer.analyze_dynamic(df)
+    assert not results_df.empty, "过零检测分析应返回结果"
+
+    mean_freq = results_df["frequency"].mean()
+    assert abs(mean_freq - target_freq) < 0.1, f"检测频率偏差过大: {mean_freq:.3f}Hz"
+
+    print(f"✓ 过零检测窗口数：{len(results_df)}")
+    print(f"✓ 平均检测频率：{mean_freq:.3f} Hz")
+
+
 def main():
     """主函数：运行所有示例"""
     print("\n" + "=" * 60)
@@ -136,6 +184,7 @@ def main():
     example2_analyze_with_config()
     example3_analyze_programmatically()
     example4_backward_compatibility()
+    example5_zero_crossing_mode()
 
     print("\n" + "=" * 60)
     print("所有示例运行完成！")

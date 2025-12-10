@@ -13,24 +13,34 @@
     "phase_decimals": 2
   },
 
-    "analysis": {
-      "window_duration_ms": 200,
-      "step_duration_ms": 100,
-      "sampling_rate": 10000,
-      "frequency_range": [49.9, 50.1],
-      "use_window": true,
-      "use_ipdft": true,
-      "refine_frequency": true,
-      "refine_config": {
-        "method": "grid_search",
-        "search_range": 0.2,
-        "step_size": 0.001
-      }
+  "analysis": {
+    "window_duration_ms": 200,
+    "step_duration_ms": 100,
+    "sampling_rate": 10000,
+    "frequency_range": [49.9, 50.1],
+    "use_window": true,
+    "use_ipdft": true,
+    "use_zero_crossing": false,
+    "zero_cross_config": {
+      "window_periods": 6,
+      "min_freq_hz": 45.0,
+      "max_freq_hz": 65.0,
+      "fake_period_ms": 0.0,
+      "min_cross_amplitude": 0.0,
+      "remove_dc": true,
+      "rising_only": true
     },
+    "refine_frequency": true,
+    "refine_config": {
+      "method": "grid_search",
+      "search_range": 0.2,
+      "step_size": 0.001
+    }
+  },
 
-    "logging": {
-      "log_file": "./log/fft_dynamic_analyzer.log",
-      "log_level": "INFO"
+  "logging": {
+    "log_file": "./log/fft_dynamic_analyzer.log",
+    "log_level": "INFO"
   },
 
   "description": "动态FFT分析配置：200ms窗口，100ms步长，10kHz采样率，关注50Hz频率"

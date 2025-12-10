@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from src.core.FFT_analyzer import FFTAnalyzer
+from src.core.Zero_Cross_Freq import ZeroCrossFreq
 
 
 class ConfigLoader:
@@ -47,6 +48,16 @@ class ConfigLoader:
                 "frequency_range": [49.9, 50.1],
                 "use_window": True,
                 "use_ipdft": True,
+                "use_zero_crossing": False,
+                "zero_cross_config": {
+                    "window_periods": 6,
+                    "min_freq_hz": 45.0,
+                    "max_freq_hz": 65.0,
+                    "fake_period_ms": 0.0,
+                    "min_cross_amplitude": 0.0,
+                    "remove_dc": True,
+                    "rising_only": True
+                },
                 "refine_frequency": True,
                 "refine_config": {
                     "method": "grid_search",
@@ -83,6 +94,8 @@ class FFTDynamicAnalyzer:
                  freq_range: Tuple[float, float] = (49.9, 50.1),
                  use_window: bool = True,
                  use_ipdft: bool = True,
+                 use_zero_crossing: bool = False,
+                 zero_cross_config: Optional[dict] = None,
                  refine_frequency: bool = False,
                  refine_config: Optional[dict] = None,
                  log_file: Optional[str] = None):
@@ -96,6 +109,8 @@ class FFTDynamicAnalyzer:
         :param freq_range: 关注的频率范围，用于结果过滤
         :param use_window: FFT分析时是否使用汉宁窗
         :param use_ipdft: 是否使用Jacobsen插值法提高频率精度
+        :param use_zero_crossing: 是否使用过零检测替代FFT
+        :param zero_cross_config: 过零检测配置（透传给ZeroCrossFreq）
         :param refine_frequency: 是否在 FFT 结果后使用最小二乘精化
         :param refine_config: 精化参数（透传给 FrequencyRefinement）
         :param log_file: 日志文件路径
@@ -113,6 +128,8 @@ class FFTDynamicAnalyzer:
             freq_range = tuple(analysis_cfg.get('frequency_range', freq_range))
             use_window = analysis_cfg.get('use_window', use_window)
             use_ipdft = analysis_cfg.get('use_ipdft', use_ipdft)
+            use_zero_crossing = analysis_cfg.get('use_zero_crossing', use_zero_crossing)
+            zero_cross_config = analysis_cfg.get('zero_cross_config', zero_cross_config)
             refine_frequency = analysis_cfg.get('refine_frequency', refine_frequency)
             refine_config = analysis_cfg.get('refine_config', refine_config)
             log_file = logging_cfg.get('log_file', log_file)
@@ -132,6 +149,8 @@ class FFTDynamicAnalyzer:
         self.freq_range = freq_range
         self.use_window = use_window
         self.use_ipdft = use_ipdft
+        self.use_zero_crossing = bool(use_zero_crossing)
+        self.zero_cross_config = zero_cross_config or {}
         self.refine_frequency = refine_frequency
         self.refine_config = refine_config or {}
 
@@ -142,12 +161,14 @@ class FFTDynamicAnalyzer:
         # 设置日志
         self._setup_logger(log_file)
 
+        method = "ZeroCrossFreq" if self.use_zero_crossing else "FFT"
         self.logger.info(f"FFTDynamicAnalyzer 初始化完成: "
-                        f"窗口={window_duration_ms}ms ({self.window_samples}点), "
-                        f"步长={step_duration_ms}ms ({self.step_samples}点), "
-                        f"采样率={sampling_rate}Hz, "
-                        f"频率范围={freq_range}Hz, "
-                        f"精化={'开启' if self.refine_frequency else '关闭'}")
+                         f"窗口={window_duration_ms}ms ({self.window_samples}点), "
+                         f"步长={step_duration_ms}ms ({self.step_samples}点), "
+                         f"采样率={sampling_rate}Hz, "
+                         f"频率范围={freq_range}Hz, "
+                         f"模式={method}, "
+                         f"精化={'开启' if self.refine_frequency else '关闭'}")
 
     def _setup_logger(self, log_file: Optional[str]):
         """设置日志系统"""
@@ -321,12 +342,14 @@ class FFTDynamicAnalyzer:
 
     def analyze_dynamic(self,
                        df: pd.DataFrame,
-                       progress_callback: Optional[Callable] = None) -> pd.DataFrame:
+                       progress_callback: Optional[Callable] = None,
+                       use_zero_crossing: Optional[bool] = None) -> pd.DataFrame:
         """
-        动态滑窗FFT分析
+        动态滑窗频率分析（FFT或过零检测）
 
         :param df: 输入DataFrame (columns: ['timestamp', 'signal'])
         :param progress_callback: 进度回调函数 callback(current, total)
+        :param use_zero_crossing: 是否使用过零检测替代FFT（覆盖实例默认值）
         :return: 结果DataFrame (columns: ['timestamp', 'frequency', 'amplitude', 'phase'])
         """
         # 检查数据长度
@@ -337,16 +360,27 @@ class FFTDynamicAnalyzer:
             )
             return pd.DataFrame(columns=['timestamp', 'frequency', 'amplitude', 'phase'])
 
-        # 初始化FFT分析器
-        fft_analyzer = FFTAnalyzer(
-            window_size=self.window_samples,
-            sampling_rate=self.sampling_rate,
-            log_file=None  # 不重复记录日志
-        )
+        # 选择频率估计器
+        zero_cross_flag = self.use_zero_crossing if use_zero_crossing is None else bool(use_zero_crossing)
+        if zero_cross_flag:
+            analyzer = ZeroCrossFreq(
+                window_size=self.window_samples,
+                sampling_rate=self.sampling_rate,
+                config=self.zero_cross_config,
+                logger=self.logger
+            )
+            mode_label = "ZeroCrossFreq"
+        else:
+            analyzer = FFTAnalyzer(
+                window_size=self.window_samples,
+                sampling_rate=self.sampling_rate,
+                log_file=None  # 不重复记录日志
+            )
+            mode_label = "FFT"
 
         # 计算窗口数量
         total_windows = (len(df) - self.window_samples) // self.step_samples + 1
-        self.logger.info(f"开始动态FFT分析: {total_windows} 个窗口")
+        self.logger.info(f"开始动态{mode_label}分析: {total_windows} 个窗口")
 
         # 滑动窗口遍历
         results = []
@@ -358,7 +392,7 @@ class FFTDynamicAnalyzer:
             window_end_time = df['timestamp'].iloc[i + self.window_samples - 1]
 
             # FFT分析
-            success, freq, amp, phase = fft_analyzer.fft_analyze(
+            success, freq, amp, phase = analyzer.fft_analyze(
                 window_data,
                 use_window=self.use_window,
                 IpDFT=self.use_ipdft,
@@ -384,7 +418,7 @@ class FFTDynamicAnalyzer:
             if progress_callback:
                 progress_callback(i // self.step_samples + 1, total_windows)
 
-        self.logger.info(f"FFT分析完成: 共 {window_count} 个有效窗口")
+        self.logger.info(f"{mode_label}分析完成: 共 {window_count} 个有效窗口")
 
         return pd.DataFrame(results)
 
@@ -458,7 +492,7 @@ class FFTDynamicAnalyzer:
             raise ValueError("必须指定输入和输出CSV路径")
 
         self.logger.info("=" * 60)
-        self.logger.info("开始动态FFT分析流程")
+        self.logger.info("开始动态频率分析流程")
         self.logger.info("=" * 60)
 
         # 1. 加载CSV
