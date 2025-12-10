@@ -1,0 +1,31 @@
+{
+  "input": {
+    "csv_path": "csv-data/clean_200ms_liner_20251210.csv",
+    "time_column": "Time [s]",
+    "signal_column": "AI 1/U4一次调频动作 [V]",
+    "time_format": "%Y-%m-%d %H:%M:%S.%f"
+  },
+
+  "output": {
+    "csv_path": "csv-data/fft_analysis_results.csv",
+    "frequency_decimals": 3,
+    "amplitude_decimals": 4,
+    "phase_decimals": 2
+  },
+
+  "analysis": {
+    "window_duration_ms": 200,
+    "step_duration_ms": 100,
+    "sampling_rate": 10000,
+    "frequency_range": [49.9, 50.1],
+    "use_window": true,
+    "use_ipdft": true
+  },
+
+  "logging": {
+    "log_file": "./log/fft_dynamic_analyzer.log",
+    "log_level": "INFO"
+  },
+
+  "description": "动态FFT分析配置：200ms窗口，100ms步长，10kHz采样率，关注50Hz频率"
+}

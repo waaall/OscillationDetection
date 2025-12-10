@@ -315,20 +315,21 @@ def simple_test(sampling_rate:int=4000,
     # )
     signal = signal + sin_signal
 
-    print("\n========= 不加窗 =========")
-    success, freq, amp, phase = tester.fft_analyze(signal, use_window=False, IpDFT=False,
-                                                   PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}no_window_dft.png")
-    print(f"no_window_dft: success={success}, freq={freq:.4f}Hz, amp={amp:.4f}, phase={np.degrees(phase):.2f}°")
+    # print("\n========= 不加窗 =========")
+    # success, freq, amp, phase = tester.fft_analyze(signal, use_window=False, IpDFT=False,
+    #                                                PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}no_window_dft.png")
+    # print(f"no_window_dft: success={success}, freq={freq:.4f}Hz, amp={amp:.4f}, phase={np.degrees(phase):.2f}°")
 
-    print("\n========= 加窗 =========")
-    success, freq2, amp2, phase2 = tester.fft_analyze(signal, use_window=True, IpDFT=False,
-                                                      PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}window_dft.png")
-    print(f"window_dft: success={success}, freq={freq2:.4f}Hz, amp={amp2:.4f}, phase={np.degrees(phase2):.2f}°")
+    # print("\n========= 加窗 =========")
+    # success, freq2, amp2, phase2 = tester.fft_analyze(signal, use_window=True, IpDFT=False,
+    #                                                   PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}window_dft.png")
+    # print(f"window_dft: success={success}, freq={freq2:.4f}Hz, amp={amp2:.4f}, phase={np.degrees(phase2):.2f}°")
 
     print("\n========= 加窗&IpDFT =========")
     success, freq3, amp3, phase3 = tester.fft_analyze(signal, use_window=True, IpDFT=True,
                                                       PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}window_ipdft.png")
     print(f"window_ipdft: success={success}, freq={freq3:.4f}Hz, amp={amp3:.4f}, phase={np.degrees(phase3):.2f}°")
+
 
 if __name__ == "__main__":
     simple_test()

@@ -1,7 +1,8 @@
 import os
 import sys
 import logging
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence, Union, List
+from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
@@ -12,18 +13,20 @@ class SignalGenerator:
                  duration: float = 10.0,
                  noise_level: float = 0.0,
                  seed: Optional[int] = None,
-                 log_file: Optional[str] = None):
+                 log_file: Optional[str] = None,
+                 start_time: Optional[datetime] = None):
         """
         可定制化的信号生成器
 
-        :param fs: 采样率 (Hz)
+        :param sampling_rate: 采样率 (Hz)
         :param duration: 信号持续时间 (s)
         :param noise_level: 噪声强度 (0~1 比例)
         :param seed: 随机种子(保证可重复性)
         :param log_file: 日志文件路径(可选)
+        :param start_time: 起始时间戳（datetime对象），默认None则使用当前时间
         """
         if sampling_rate <= 0 or duration <= 0:
-            raise ValueError("fs 和 duration 必须为正数")
+            raise ValueError("sampling_rate 和 duration 必须为正数")
         if not (0 <= noise_level <= 1):
             raise ValueError("noise_level 必须在 [0, 1] 范围内")
 
@@ -34,12 +37,23 @@ class SignalGenerator:
         if seed is not None:
             np.random.seed(seed)
 
+        # 时间戳系统
+        if start_time is None:
+            self.start_time = datetime.now()
+        else:
+            self.start_time = start_time
+
+        # 保留向后兼容性：秒为单位的浮点数组
         self.signal_data = np.arange(0, duration, 1 / sampling_rate)
+
+        # 生成datetime时间戳数组
+        self.timestamps = self._generate_timestamps()
 
         # 设置日志
         self._setup_logger(log_file)
         self.logger.info(f"SignalGenerator 初始化: fs={sampling_rate}, duration={duration}, "
-                         f"noise_level={noise_level}, seed={seed}")
+                         f"noise_level={noise_level}, seed={seed}, "
+                         f"start_time={self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     def _setup_logger(self, log_file: Optional[str]):
         """配置日志系统"""
@@ -64,6 +78,38 @@ class SignalGenerator:
             self.logger.addHandler(file_handler)
 
         self.logger.propagate = True
+
+    def _generate_timestamps(self) -> List[datetime]:
+        """
+        生成datetime时间戳数组
+
+        :return: datetime时间戳列表
+        """
+        timestamps = []
+        delta = timedelta(seconds=1/self._sampling_rate)
+        current_time = self.start_time
+
+        for _ in range(len(self.signal_data)):
+            timestamps.append(current_time)
+            current_time += delta
+
+        return timestamps
+
+    def get_datetime_array(self) -> List[datetime]:
+        """返回datetime时间戳数组"""
+        return self.timestamps
+
+    def format_timestamp(self,
+                        dt: datetime,
+                        format_str: str = "%Y-%m-%d %H:%M:%S.%f") -> str:
+        """
+        格式化单个时间戳
+
+        :param dt: datetime对象
+        :param format_str: 格式字符串
+        :return: 格式化的时间字符串
+        """
+        return dt.strftime(format_str)
 
     def sine_wave(self,
                   freqs: Sequence[float],
@@ -178,7 +224,9 @@ class SignalGenerator:
                         start_idx: int = 0,
                         new_signal: Optional[np.ndarray] = None,
                         isCUT: bool = True,
-                        save_path: Optional[str] = None) -> pd.DataFrame:
+                        save_path: Optional[str] = None,
+                        use_datetime: bool = False,
+                        time_format: str = "%Y-%m-%d %H:%M:%S.%f") -> pd.DataFrame:
         """
         将模拟信号插入到 CSV 文件中
 
@@ -188,36 +236,72 @@ class SignalGenerator:
         :param new_signal: 新信号 (numpy 数组)
         :param isCUT: True=替换, False=追加
         :param save_path: 保存路径(如果 None, 则覆盖原文件)
+        :param use_datetime: 是否使用datetime时间戳（默认False保留兼容性）
+        :param time_format: datetime格式字符串
         """
         if new_signal is None or len(new_signal) == 0:
             raise ValueError("new_signal 不能为空")
 
-        if not os.path.exists(csv_path):
-            self.logger.warning(f"文件 {csv_path} 不存在, 新建文件")
-            df = pd.DataFrame({
-                "time": self.signal_data[:len(new_signal)],
-                column: new_signal
-            })
-        else:
-            df = pd.read_csv(csv_path)
-
-            if column not in df.columns:
-                df[column] = 0.0
-
-            if isCUT:
-                end_idx = min(start_idx + len(new_signal), len(df))
-                if end_idx - start_idx < len(new_signal):
-                    self.logger.warning("新信号长度超过原始数据长度, 仅部分替换")
-                df.loc[start_idx:end_idx - 1, column] = new_signal[:end_idx - start_idx]
+        if use_datetime:
+            # 新逻辑：使用datetime时间戳
+            if not os.path.exists(csv_path):
+                self.logger.warning(f"文件 {csv_path} 不存在, 新建文件")
+                time_array = [self.format_timestamp(ts, time_format)
+                             for ts in self.timestamps[:len(new_signal)]]
+                df = pd.DataFrame({
+                    "time": time_array,
+                    column: new_signal
+                })
             else:
-                self.logger.info("isCUT=False, 执行追加操作")
-                extra_time = np.arange(len(df), len(df) + len(new_signal)) / self._sampling_rate
-                df_extra = pd.DataFrame({"time": extra_time, column: new_signal})
-                df = pd.concat([df, df_extra], ignore_index=True)
+                df = pd.read_csv(csv_path)
+
+                if column not in df.columns:
+                    df[column] = 0.0
+
+                if isCUT:
+                    end_idx = min(start_idx + len(new_signal), len(df))
+                    if end_idx - start_idx < len(new_signal):
+                        self.logger.warning("新信号长度超过原始数据长度, 仅部分替换")
+                    df.loc[start_idx:end_idx - 1, column] = new_signal[:end_idx - start_idx]
+                    # 更新时间戳
+                    time_array = [self.format_timestamp(ts, time_format)
+                                 for ts in self.timestamps[start_idx:end_idx]]
+                    df.loc[start_idx:end_idx - 1, "time"] = time_array[:end_idx - start_idx]
+                else:
+                    self.logger.info("isCUT=False, 执行追加操作")
+                    time_array = [self.format_timestamp(ts, time_format)
+                                 for ts in self.timestamps[:len(new_signal)]]
+                    df_extra = pd.DataFrame({"time": time_array, column: new_signal})
+                    df = pd.concat([df, df_extra], ignore_index=True)
+        else:
+            # 原有逻辑：保持不变
+            if not os.path.exists(csv_path):
+                self.logger.warning(f"文件 {csv_path} 不存在, 新建文件")
+                df = pd.DataFrame({
+                    "time": self.signal_data[:len(new_signal)],
+                    column: new_signal
+                })
+            else:
+                df = pd.read_csv(csv_path)
+
+                if column not in df.columns:
+                    df[column] = 0.0
+
+                if isCUT:
+                    end_idx = min(start_idx + len(new_signal), len(df))
+                    if end_idx - start_idx < len(new_signal):
+                        self.logger.warning("新信号长度超过原始数据长度, 仅部分替换")
+                    df.loc[start_idx:end_idx - 1, column] = new_signal[:end_idx - start_idx]
+                else:
+                    self.logger.info("isCUT=False, 执行追加操作")
+                    extra_time = np.arange(len(df), len(df) + len(new_signal)) / self._sampling_rate
+                    df_extra = pd.DataFrame({"time": extra_time, column: new_signal})
+                    df = pd.concat([df, df_extra], ignore_index=True)
 
         save_path = save_path or csv_path
         df.to_csv(save_path, index=False)
-        self.logger.info(f"信号已写入 {save_path}, 列: {column}, 模式: {'替换' if isCUT else '追加'}")
+        self.logger.info(f"信号已写入 {save_path}, 列: {column}, 模式: {'替换' if isCUT else '追加'}, "
+                        f"datetime模式: {use_datetime}")
         return df
 
     def trim_signal(self, signal: np.ndarray, 
