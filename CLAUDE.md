@@ -1,0 +1,305 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 项目概述
+
+基于FFT频域分析的振荡检测工具，适用于电网频率监测和信号分析。项目包含三个独立但相关的分析系统：静态FFT分析、动态FFT分析和长期振荡检测。
+
+## 核心架构
+
+### 模块依赖关系
+
+```
+SignalGenerator (基础层)
+    ↓ 被所有模块使用
+    ├─→ FFT_analyzer (单次FFT分析)
+    │       ↓
+    │   OscillationDetection (长期振荡检测)
+    │       ↓
+    │   test_oscillation_detection.py (测试框架)
+    │
+    └─→ FFT_dynamic_analyzer (动态FFT分析)
+            ↓
+        example_dynamic_fft.py (使用示例)
+```
+
+### 三种分析模式对比
+
+| 模式 | 采样率 | 窗口大小 | 用途 | 输入格式 |
+|------|--------|---------|------|---------|
+| **FFT_analyzer** | 10kHz | 800点(0.08s) | 静态信号质量分析 | numpy数组 |
+| **FFT_dynamic_analyzer** | 可配置(默认10kHz) | 可配置(默认200ms) | 动态频率跟踪 | CSV+datetime时间戳 |
+| **OscillationDetection** | 1Hz | 60点(60s) | 长期振荡监测 | CSV |
+
+### 关键设计模式
+
+1. **时间戳系统** (SignalGenerator)
+   - `signal_data`: 秒浮点数组（向后兼容）
+   - `timestamps`: datetime数组（新功能）
+   - `use_datetime` 参数控制输出格式
+
+2. **配置驱动架构**
+   - JSON配置文件优先
+   - 支持编程式参数覆盖
+   - 配置验证和默认值处理
+
+3. **滑动窗口分析**
+   - `window_size`: 窗口大小（数据点数）
+   - `step_size = window_size * (1 - overlap_ratio)`
+   - 窗口结束时刻作为该窗口的时间戳
+
+## 常用命令
+
+### 运行测试和示例
+
+```bash
+# 静态FFT分析测试
+python FFT_analyzer.py
+
+# 动态FFT分析完整示例（推荐）
+python example_dynamic_fft.py
+
+# 振荡检测 - 创建配置文件模板
+python test_oscillation_detection.py --create-config
+
+# 振荡检测 - 实时动画模式
+python test_oscillation_detection.py --mode animation
+
+# 振荡检测 - 静态批量分析
+python test_oscillation_detection.py --mode static
+```
+
+### 生成测试数据
+
+```python
+# 生成带datetime时间戳的测试信号
+from SignalGenerator import SignalGenerator
+from datetime import datetime
+
+gen = SignalGenerator(
+    sampling_rate=10000,
+    duration=1.0,
+    start_time=datetime(2025, 12, 10, 10, 0, 0)
+)
+signal = gen.harmonic_wave(fundamental_freq=50.0)
+gen.insert_into_csv(
+    "test.csv",
+    new_signal=signal,
+    use_datetime=True,
+    time_format="%Y-%m-%d %H:%M:%S.%f"
+)
+```
+
+### 动态FFT分析
+
+```python
+# 使用配置文件
+from FFT_dynamic_analyzer import FFTDynamicAnalyzer
+
+analyzer = FFTDynamicAnalyzer(config_path="config_fft_dynamic.json")
+results = analyzer.run_pipeline()
+
+# 编程式配置
+analyzer = FFTDynamicAnalyzer(
+    window_duration_ms=200,
+    step_duration_ms=100,
+    sampling_rate=10000,
+    freq_range=(49.9, 50.1)
+)
+df = analyzer.load_csv("input.csv")
+results_df = analyzer.analyze_dynamic(df)
+analyzer.save_results(results_df, "output.csv")
+```
+
+## 代码规范
+
+### 时间戳格式约定
+
+- **输入格式** (微秒精度): `2025-12-10 10:34:37.998700`
+- **输出格式** (毫秒精度): `2025/12/10 10:34:37::608`
+  - 注意：毫秒部分用 `::` 分隔，而非 `.`
+
+### 时间戳格式化实现
+
+```python
+def _format_timestamp_output(self, dt: datetime) -> str:
+    date_str = dt.strftime("%Y/%m/%d %H:%M:%S")
+    milliseconds = dt.microsecond // 1000
+    return f"{date_str}::{milliseconds:03d}"
+```
+
+### FFT分析返回值约定
+
+所有FFT分析函数返回格式：
+```python
+(success: bool, frequency: float, amplitude: float, phase: float)
+```
+- `phase` 单位为弧度，需要时使用 `np.degrees()` 转换
+
+### 窗口大小计算
+
+```python
+# 基于时长计算
+window_samples = int(sampling_rate * window_duration_ms / 1000)
+
+# 基于基频倍数计算（用于振荡检测）
+window_size = int(sampling_rate / fundamental_freq * window_Ts)
+```
+
+## 向后兼容性
+
+### SignalGenerator 重构说明
+
+SignalGenerator 已添加 datetime 支持，但完全向后兼容：
+
+```python
+# ✅ 原有代码无需修改
+gen = SignalGenerator(sampling_rate=1000, duration=10.0)
+signal = gen.sine_wave(freqs=[50])
+gen.insert_into_csv("test.csv", new_signal=signal)
+
+# ✅ 新功能：datetime时间戳
+gen = SignalGenerator(
+    sampling_rate=1000,
+    start_time=datetime(2025, 12, 10, 10, 0, 0)
+)
+gen.insert_into_csv("test.csv", new_signal=signal, use_datetime=True)
+```
+
+### 关键点
+- `signal_data` 属性保留（秒浮点数组）
+- 新增 `timestamps` 属性（datetime数组）
+- `insert_into_csv()` 的 `use_datetime` 默认为 `False`
+
+## 配置文件结构
+
+### config_fft_dynamic.json (动态FFT分析)
+
+```json
+{
+  "input": {
+    "csv_path": "csv-data/input.csv",
+    "time_column": "Time [s]",
+    "signal_column": "signal",
+    "time_format": "%Y-%m-%d %H:%M:%S.%f"
+  },
+  "output": {
+    "csv_path": "csv-data/output.csv",
+    "frequency_decimals": 3,
+    "amplitude_decimals": 4,
+    "phase_decimals": 2
+  },
+  "analysis": {
+    "window_duration_ms": 200,
+    "step_duration_ms": 100,
+    "sampling_rate": 10000,
+    "frequency_range": [49.9, 50.1],
+    "use_window": true,
+    "use_ipdft": true
+  },
+  "logging": {
+    "log_file": "./log/fft_dynamic_analyzer.log",
+    "log_level": "INFO"
+  }
+}
+```
+
+### oscillate_dev_settings.json (振荡检测)
+
+关键参数：
+- `window_size`: 60 (默认，点数)
+- `sampling_rate`: 1.0 (Hz，长期监测)
+- `overlap_ratio`: 0.5 (50%重叠)
+- `threshold`: 振荡判断阈值
+- `generate_signal`: true/false (是否生成测试信号)
+
+## 频率分辨率计算
+
+```
+频率分辨率(Δf) = sampling_rate / window_size
+
+示例：
+- FFT_analyzer: 10000Hz / 800 = 12.5Hz
+- FFT_dynamic_analyzer: 10000Hz / 2000 = 5Hz (200ms窗口)
+- OscillationDetection: 1Hz / 60 = 0.0167Hz
+```
+
+## 插值DFT优化
+
+使用 Jacobsen 三点插值法提高频率精度：
+
+```python
+# 当 IpDFT=True 时
+delta = 0.5 * (alpha - gamma) / (alpha - 2*beta + gamma)
+peak_freq = peak_freq + delta * frequency_resolution
+peak_amp = beta - 0.25 * (alpha - gamma) * delta
+```
+
+可将频率精度从分辨率（5-12Hz）提高到 0.01Hz 级别。
+
+## 日志系统
+
+所有模块使用统一的日志模式：
+- **控制台**: INFO级别，简洁格式 `[%(levelname)s] %(message)s`
+- **文件**: INFO级别，完整格式 `[%(asctime)s] %(message)s`
+- 日志目录自动创建（`./log/`）
+
+## 项目特定规范
+
+基于用户的全局 CLAUDE.md 规范：
+
+1. **模块化设计**: 避免硬编码，使用配置文件或参数传递
+2. **中文注释**: 代码关键步骤使用简洁的中文注释
+3. **假设先行**: 信息不足时先列出假设再实现
+4. **避免生成文档**: 代码修改不主动生成总结性文档文件
+
+## 边界情况处理
+
+### FFT_dynamic_analyzer 边界处理
+
+| 情况 | 处理方式 |
+|------|---------|
+| 数据长度不足窗口大小 | 返回空结果并记录错误 |
+| 采样率不均匀（>5%误差） | 警告日志，继续分析 |
+| 时间戳乱序 | 自动排序并警告 |
+| 缺失值 | 前向填充 `fillna(method='ffill')` |
+| 频率超出范围 | 跳过该窗口结果 |
+
+## 文件组织
+
+```
+csv-data/           # CSV数据目录
+    ├── test_dynamic_input.csv   # 测试输入
+    └── test_dynamic_output.csv  # 测试输出
+log/                # 日志目录（自动创建）
+plots/              # 图表输出目录
+config_*.json       # 配置文件
+example_*.py        # 使用示例脚本
+```
+
+## 性能考虑
+
+- **大文件处理**: 405454行数据约需 5秒，内存使用 < 10MB
+- **窗口优化**: 使用向量化操作避免Python循环
+- **内存优化**: 分块处理大文件（如需要）
+
+## 测试数据生成模式
+
+用于生成不同类型的测试信号：
+
+```python
+# 正弦波叠加
+signal = gen.sine_wave(freqs=[50, 120], amps=[1, 0.5])
+
+# 谐波信号（电网典型）
+signal = gen.harmonic_wave(
+    fundamental_freq=50.0,
+    num_harmonics=5,
+    amps='typical'  # 或 'linear', 'exponential'
+)
+
+# 多项式 + 指数
+signal = gen.polynomial(coeffs=[1, -2, 1])
+signal += gen.exponential(A=1, tau=0.5)
+```
