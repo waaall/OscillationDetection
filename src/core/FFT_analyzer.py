@@ -4,7 +4,7 @@ import logging
 from typing import List, Tuple, Optional
 import numpy as np
 
-from SignalGenerator import SignalGenerator
+from src.core.SignalGenerator import SignalGenerator
 
 # FFT 幅值归一化常量 (因为单边FFT需要乘2来补偿负频率部分的能量)
 FFT_AMP_NORMAL_FACTOR = 2
@@ -116,7 +116,8 @@ class FFTAnalyzer:
         return signal
 
     def fft_analyze(self, signal_data: np.ndarray, PLOT_path: str = None, use_window: bool = False,
-                    IpDFT: bool = True) -> Tuple[bool, Optional[float], Optional[float], Optional[float]]:
+                    IpDFT: bool = True, refine_frequency: bool = False,
+                    refine_config: Optional[dict] = None) -> Tuple[bool, Optional[float], Optional[float], Optional[float]]:
         """
         FFT分析函数，支持相量测量（频率、幅值、相位角）
         
@@ -124,6 +125,8 @@ class FFTAnalyzer:
         :param PLOT_path: 绘图保存路径
         :param use_window: 是否使用窗函数
         :param IpDFT: 是否使用插值DFT（Jacobsen插值法）
+        :param refine_frequency: 是否使用最小二乘精化频率
+        :param refine_config: 精化配置
         :return: (success, frequency, amplitude, phase)
         """
         if len(signal_data) < self._window_size:
@@ -169,6 +172,37 @@ class FFTAnalyzer:
             delta = 0.5 * (alpha - gamma) / (alpha - 2 * beta + gamma)
             peak_freq = peak_freq + delta * (valid_freqs[1] - valid_freqs[0])
             peak_amp = beta - 0.25 * (alpha - gamma) * delta
+
+        # 频率精细化（最小二乘）
+        if refine_frequency and peak_freq is not None:
+            try:
+                from src.core.FrequencyRefinement import FrequencyRefinement
+
+                refiner = FrequencyRefinement(
+                    logger=self.logger,
+                    **(refine_config or {})
+                )
+
+                refined = refiner.refine(
+                    windowed_data,
+                    self._sampling_rate,
+                    peak_freq,
+                    return_all_params=True
+                )
+
+                if refined is not None:
+                    freq_refined, amp_refined, phase_refined, dc_refined, residual = refined
+                    self.logger.info(
+                        f"频率精化: {peak_freq:.6f}Hz → {freq_refined:.6f}Hz "
+                        f"(残差={residual:.6f})"
+                    )
+                    peak_freq = freq_refined
+                    peak_amp = amp_refined
+                    peak_phase = phase_refined
+                else:
+                    self.logger.warning("频率精化失败，保持IpDFT结果")
+            except Exception as e:
+                self.logger.error(f"频率精化异常: {e}，降级到IpDFT")
 
         # 绘图
         if PLOT_path:
@@ -293,9 +327,13 @@ class FFTAnalyzer:
         self.logger.info(f"对比图已保存: {save_path}")
 
 
-def simple_test(sampling_rate:int=4000,
-                frequency:float=50.02,
-                window_Ts:int=8):
+def simple_test(sampling_rate: int = 4000,
+                frequency: float = 50.02,
+                window_Ts: int = 8,
+                test_refinement: bool = True):
+    """
+    FFT 精度对比测试：FFT 基线 / IpDFT / 最小二乘精化
+    """
     duration_s = 2.0
     window_size = int(sampling_rate / 50 * window_Ts)
     tester = FFTAnalyzer(window_size=window_size,
@@ -308,27 +346,58 @@ def simple_test(sampling_rate:int=4000,
     generator = SignalGenerator(sampling_rate=sampling_rate,
                                 duration=duration_s)
     sin_signal = generator.sine_wave(freqs=[10], amps=[0.05])
-    # signal = generator.trim_signal(
-    #     signal,
-    #     frequency=frequency,
-    #     phase_angle=np.pi/6
-    # )
     signal = signal + sin_signal
 
-    # print("\n========= 不加窗 =========")
-    # success, freq, amp, phase = tester.fft_analyze(signal, use_window=False, IpDFT=False,
-    #                                                PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}no_window_dft.png")
-    # print(f"no_window_dft: success={success}, freq={freq:.4f}Hz, amp={amp:.4f}, phase={np.degrees(phase):.2f}°")
+    print("\n" + "=" * 70)
+    print(f"测试配置: 真实频率={frequency:.6f}Hz, 采样率={sampling_rate}Hz, "
+          f"窗口={window_size}点")
+    print(f"频率分辨率: Δf={sampling_rate / window_size:.4f}Hz")
+    print("=" * 70)
 
-    # print("\n========= 加窗 =========")
-    # success, freq2, amp2, phase2 = tester.fft_analyze(signal, use_window=True, IpDFT=False,
-    #                                                   PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}window_dft.png")
-    # print(f"window_dft: success={success}, freq={freq2:.4f}Hz, amp={amp2:.4f}, phase={np.degrees(phase2):.2f}°")
+    # 方法1: FFT（无窗无插值）
+    print("\n【方法1】FFT（基线）")
+    success1, freq1, amp1, phase1 = tester.fft_analyze(
+        signal, use_window=False, IpDFT=False
+    )
+    error1 = abs(freq1 - frequency) * 1000  # mHz
+    print(f"  频率: {freq1:.6f}Hz, 误差: {error1:.3f}mHz")
 
-    print("\n========= 加窗&IpDFT =========")
-    success, freq3, amp3, phase3 = tester.fft_analyze(signal, use_window=True, IpDFT=True,
-                                                      PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}window_ipdft.png")
-    print(f"window_ipdft: success={success}, freq={freq3:.4f}Hz, amp={amp3:.4f}, phase={np.degrees(phase3):.2f}°")
+    # 方法2: FFT + IpDFT
+    print("\n【方法2】FFT + Jacobsen插值")
+    success2, freq2, amp2, phase2 = tester.fft_analyze(
+        signal, use_window=True, IpDFT=True,
+        PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}_ipdft.png"
+    )
+    error2 = abs(freq2 - frequency) * 1000
+    improvement2 = error1 / error2 if error2 > 0 else float('inf')
+    print(f"  频率: {freq2:.6f}Hz, 误差: {error2:.3f}mHz (精度提升 {improvement2:.1f}x)")
+
+    # 方法3: FFT + IpDFT + 最小二乘精化
+    if test_refinement:
+        print("\n【方法3】FFT + IpDFT + 最小二乘拟合")
+        import time
+        start_time = time.time()
+
+        success3, freq3, amp3, phase3 = tester.fft_analyze(
+            signal, use_window=True, IpDFT=True,
+            refine_frequency=True,
+            PLOT_path=f"./plots/{sampling_rate}_{frequency}_{window_Ts}_refined.png"
+        )
+
+        elapsed = (time.time() - start_time) * 1000  # ms
+        error3 = abs(freq3 - frequency) * 1000
+        improvement3 = error1 / error3 if error3 > 0 else float('inf')
+        print(f"  频率: {freq3:.6f}Hz, 误差: {error3:.3f}mHz (精度提升 {improvement3:.1f}x)")
+        print(f"  耗时: {elapsed:.2f}ms")
+
+    # 对比总结
+    print("\n" + "=" * 70)
+    print("精度对比总结:")
+    print(f"  FFT基线:        {error1:.3f} mHz")
+    print(f"  IpDFT插值:      {error2:.3f} mHz  (提升 {improvement2:.1f}x)")
+    if test_refinement:
+        print(f"  最小二乘精化:   {error3:.3f} mHz  (提升 {improvement3:.1f}x)")
+    print("=" * 70)
 
 
 if __name__ == "__main__":

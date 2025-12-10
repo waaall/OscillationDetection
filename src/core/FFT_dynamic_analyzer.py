@@ -2,12 +2,13 @@ import os
 import sys
 import json
 import logging
+from pathlib import Path
 from typing import List, Tuple, Optional, Callable
 from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from FFT_analyzer import FFTAnalyzer
+from src.core.FFT_analyzer import FFTAnalyzer
 
 
 class ConfigLoader:
@@ -466,8 +467,9 @@ class FFTDynamicAnalyzer:
 # ===================== 测试 =====================
 def test_dynamic_analyzer():
     """测试动态FFT分析器"""
-    # 使用配置文件
-    analyzer = FFTDynamicAnalyzer(config_path="config_fft_dynamic.json")
+    # 使用与模块同目录的配置文件
+    config_path = Path(__file__).with_name("config_fft_dynamic.json")
+    analyzer = FFTDynamicAnalyzer(config_path=str(config_path))
 
     # 运行完整流程
     results = analyzer.run_pipeline()

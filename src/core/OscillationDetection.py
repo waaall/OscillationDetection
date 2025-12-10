@@ -5,7 +5,7 @@ import matplotlib.animation as animation
 import logging
 import os
 from typing import Optional
-from FFT_analyzer import FFTAnalyzer
+from src.core.FFT_analyzer import FFTAnalyzer
 
 # FFT 幅值归一化常量 (因为单边FFT需要乘2来补偿负频率部分的能量;直流分量和奈奎斯特频率,不应该乘)
 FFT_AMP_NORMAL_FACTOR = 2
@@ -242,15 +242,20 @@ class OscillationDetection:
             # --------- 振荡检测 ---------
             try:
                 result, peak_freq, peak_amp, __ = self.detector.fft_analyze(window_data)
-                if result:
-                    if peak_freq >= self.threshold:
-                        self.trigger_text.set_text(f"Detected Oscillation!\nFrequency: {peak_freq:.2f}Hz; Amplitude: {peak_amp:.3f}")
-                        self.trigger_text.set_color("red")
-                        self.logger.info(f"窗口 {frame_idx}: 检测到振荡 - 频率={peak_freq:.2f}Hz, 幅值={peak_amp:.3f}")
-                    else:
-                        self.trigger_text.set_text("Normal")
-                        self.trigger_text.set_color("green")
-                    
+                is_trigger = bool(result and peak_amp is not None and peak_amp >= self.threshold)
+
+                if is_trigger:
+                    self.trigger_text.set_text(
+                        f"Detected Oscillation!\nFrequency: {peak_freq:.2f}Hz; Amplitude: {peak_amp:.3f}"
+                    )
+                    self.trigger_text.set_color("red")
+                    self.logger.info(
+                        f"窗口 {frame_idx}: 检测到振荡 - 频率={peak_freq:.2f}Hz, 幅值={peak_amp:.3f}"
+                    )
+                else:
+                    self.trigger_text.set_text("Normal")
+                    self.trigger_text.set_color("green")
+
             except Exception as e:
                 self.logger.error(f"振荡检测失败 (窗口 {frame_idx}): {e}")
                 self.trigger_text.set_text("Detection Error")
@@ -326,7 +331,8 @@ class OscillationDetection:
                     window_data = pd.Series(window_data).fillna(method='ffill').fillna(0).values
                 
                 # 检测振荡
-                is_trigger, peak_freq, peak_amp = self.detector.detect(window_data)
+                success, peak_freq, peak_amp, _ = self.detector.fft_analyze(window_data)
+                is_trigger = bool(success and peak_amp is not None and peak_amp >= self.threshold)
                 
                 result = {
                     'window': frame_idx,

@@ -8,12 +8,19 @@ from typing import List, Tuple, Dict, Optional
 from pathlib import Path
 import numpy as np
 
-from SignalGenerator import SignalGenerator
-from OscillationDetection import OscillationDetection
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.core.SignalGenerator import SignalGenerator
+from src.core.OscillationDetection import OscillationDetection
+
+
+DEFAULT_CONFIG = PROJECT_ROOT / "src" / "oscillate_dev_settings.json"
 
 
 class ODDevFlow:
-    def __init__(self, config_file: str = "oscillate_dev_settings.json"):
+    def __init__(self, config_file: str = str(DEFAULT_CONFIG)):
         """
         振荡检测开发流程主类
         
@@ -142,7 +149,7 @@ class ODDevFlow:
             sys.exit(1)
 
     @staticmethod
-    def save_config_template(config_file: str = "oscillate_dev_settings.json") -> None:
+    def save_config_template(config_file: str = str(DEFAULT_CONFIG)) -> None:
         """
         保存完整的配置文件模板
         
@@ -171,9 +178,12 @@ class ODDevFlow:
         }
         
         try:
-            with open(config_file, 'w', encoding='utf-8') as f:
+            config_path = Path(config_file)
+            if config_path.parent:
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(template_config, f, ensure_ascii=False, indent=4)
-            print(f"[SUCCESS] 配置文件模板已保存: {config_file}")
+            print(f"[SUCCESS] 配置文件模板已保存: {config_path}")
         except Exception as e:
             print(f"[ERROR] 保存配置文件模板失败: {e}")
 
@@ -359,8 +369,8 @@ def main():
     parser.add_argument(
         '--config', '-c',
         type=str,
-        default='oscillate_dev_settings.json',
-        help='配置文件路径 (默认: oscillate_dev_settings.json)'
+        default=str(DEFAULT_CONFIG),
+        help='配置文件路径 (默认: src/oscillate_dev_settings.json)'
     )
     
     parser.add_argument(

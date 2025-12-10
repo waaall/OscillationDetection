@@ -11,17 +11,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### 模块依赖关系
 
 ```
-SignalGenerator (基础层)
+src/core/SignalGenerator (基础层)
     ↓ 被所有模块使用
-    ├─→ FFT_analyzer (单次FFT分析)
+    ├─→ src/core/FFT_analyzer (单次FFT分析)
     │       ↓
-    │   OscillationDetection (长期振荡检测)
+    │   src/core/OscillationDetection (长期振荡检测)
     │       ↓
-    │   test_oscillation_detection.py (测试框架)
+    │   tests/test_oscillation_detection.py (开发流程)
     │
-    └─→ FFT_dynamic_analyzer (动态FFT分析)
+    └─→ src/core/FFT_dynamic_analyzer (动态FFT分析)
             ↓
-        example_dynamic_fft.py (使用示例)
+        tests/test_dynamic_fft.py (示例/烟囱测试)
 ```
 
 ### 三种分析模式对比
@@ -55,26 +55,28 @@ SignalGenerator (基础层)
 
 ```bash
 # 静态FFT分析测试
-python FFT_analyzer.py
+python -m src.FFT_analyzer
 
-# 动态FFT分析完整示例（推荐）
-python example_dynamic_fft.py
+# 动态FFT分析示例
+python tests/test_dynamic_fft.py
+# 或使用默认配置跑一遍管线
+python -m src.core.FFT_dynamic_analyzer
 
 # 振荡检测 - 创建配置文件模板
-python test_oscillation_detection.py --create-config
+python tests/test_oscillation_detection.py --create-config --config src/oscillate_dev_settings.json
 
 # 振荡检测 - 实时动画模式
-python test_oscillation_detection.py --mode animation
+python tests/test_oscillation_detection.py --mode animation --config src/oscillate_dev_settings.json
 
 # 振荡检测 - 静态批量分析
-python test_oscillation_detection.py --mode static
+python tests/test_oscillation_detection.py --mode static --config src/oscillate_dev_settings.json
 ```
 
 ### 生成测试数据
 
 ```python
 # 生成带datetime时间戳的测试信号
-from SignalGenerator import SignalGenerator
+from src.core.SignalGenerator import SignalGenerator
 from datetime import datetime
 
 gen = SignalGenerator(
@@ -95,9 +97,9 @@ gen.insert_into_csv(
 
 ```python
 # 使用配置文件
-from FFT_dynamic_analyzer import FFTDynamicAnalyzer
+from src.core.FFT_dynamic_analyzer import FFTDynamicAnalyzer
 
-analyzer = FFTDynamicAnalyzer(config_path="config_fft_dynamic.json")
+analyzer = FFTDynamicAnalyzer(config_path="src/core/config_fft_dynamic.json")
 results = analyzer.run_pipeline()
 
 # 编程式配置
@@ -174,7 +176,7 @@ gen.insert_into_csv("test.csv", new_signal=signal, use_datetime=True)
 
 ## 配置文件结构
 
-### config_fft_dynamic.json (动态FFT分析)
+### src/core/config_fft_dynamic.json (动态FFT分析)
 
 ```json
 {
@@ -205,7 +207,7 @@ gen.insert_into_csv("test.csv", new_signal=signal, use_datetime=True)
 }
 ```
 
-### oscillate_dev_settings.json (振荡检测)
+### src/oscillate_dev_settings.json (振荡检测)
 
 关键参数：
 - `window_size`: 60 (默认，点数)
@@ -238,6 +240,33 @@ peak_amp = beta - 0.25 * (alpha - gamma) * delta
 
 可将频率精度从分辨率（5-12Hz）提高到 0.01Hz 级别。
 
+## 频率精细化（最小二乘拟合）
+
+基于“FFT 粗估 + 最小二乘拟合”，在保持向后兼容的前提下提供 mHz 级频率估计。
+
+```python
+from src.core.FFT_analyzer import FFTAnalyzer
+
+analyzer = FFTAnalyzer(window_size=800, sampling_rate=10000)
+
+# 启用精化
+success, freq, amp, phase = analyzer.fft_analyze(
+    signal,
+    use_window=True,
+    IpDFT=True,
+    refine_frequency=True,
+    refine_config={
+        "method": "minimize_scalar",  # 默认；无 SciPy 时自动回退到 grid_search
+        "search_range": 0.05,         # 可选：覆盖 ±range
+        "step_size": 0.001            # grid_search 步长（Hz）
+    }
+)
+```
+
+- **自适应搜索范围**：默认 `range = max(5*Δf, 0.05)`；若初值在 49–51Hz，软限制为 `min(range, 0.5)`。精化失败时自动扩大一档后重试。
+- **模型**：给定频率下，线性最小二乘解 `y = a*sin(ωt) + b*cos(ωt) + dc`，再做一维频率搜索（Brent/网格+二次插值）。
+- **适用场景**：单频 + DC，SNR≥30dB，数据长度≥0.16s（推荐 ≥0.5s）。实时循环默认关闭，仅按需开启。
+
 ## 日志系统
 
 所有模块使用统一的日志模式：
@@ -269,13 +298,13 @@ peak_amp = beta - 0.25 * (alpha - gamma) * delta
 ## 文件组织
 
 ```
+src/core/           # 核心算法与配置 (config_fft_dynamic.json 等)
+src/oscillate_dev_settings.json  # 振荡检测默认配置
+tests/              # 示例/测试脚本 (test_dynamic_fft.py 等)
 csv-data/           # CSV数据目录
-    ├── test_dynamic_input.csv   # 测试输入
-    └── test_dynamic_output.csv  # 测试输出
 log/                # 日志目录（自动创建）
 plots/              # 图表输出目录
-config_*.json       # 配置文件
-example_*.py        # 使用示例脚本
+docs/               # 说明文档
 ```
 
 ## 性能考虑

@@ -4,10 +4,17 @@
 演示如何使用FFTDynamicAnalyzer和SignalGenerator进行动态频率分析
 """
 
-from FFT_dynamic_analyzer import FFTDynamicAnalyzer
-from SignalGenerator import SignalGenerator
+from pathlib import Path
 from datetime import datetime
+import sys
 import numpy as np
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.core.FFT_dynamic_analyzer import FFTDynamicAnalyzer
+from src.core.SignalGenerator import SignalGenerator
 
 
 def example1_generate_test_signal():
@@ -46,7 +53,9 @@ def example2_analyze_with_config():
     print("=" * 60)
 
     # 使用配置文件
-    analyzer = FFTDynamicAnalyzer(config_path="config_fft_test.json")
+    project_root = Path(__file__).resolve().parents[1]
+    config_path = project_root / "src" / "core" / "config_fft_dynamic.json"
+    analyzer = FFTDynamicAnalyzer(config_path=str(config_path))
 
     # 运行完整流程
     results = analyzer.run_pipeline()

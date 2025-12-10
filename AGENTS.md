@@ -1,17 +1,17 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Core analyzers: `FFT_analyzer.py` (single-window FFT), `FFT_dynamic_analyzer.py` (sliding-window pipeline), `OscillationDetection.py` (visual + threshold detection), helper `SignalGenerator.py`.
-- Workflows: `test_oscillation_detection.py` orchestrates the dev flow with CSV + config; `test_dynamic_fft.py` scripts four demo scenarios for dynamic FFT.
-- Config/data/logs: JSON configs (`config_fft_dynamic.json`, `oscillate_dev_settings.json`) live in repo root; data in `csv-data/`; outputs land in `plots/` and `log/` (created on demand). Keep `config_fft_dynamic.json` aligned with any schema changes.
+- Core analyzers: `src/core/FFT_analyzer.py` (single-window FFT), `src/core/FFT_dynamic_analyzer.py` (sliding-window pipeline), `src/core/OscillationDetection.py` (visual + threshold detection), helper `src/core/SignalGenerator.py`.
+- Workflows: `tests/test_oscillation_detection.py` orchestrates the dev flow with CSV + config; `tests/test_dynamic_fft.py` scripts four demo scenarios for dynamic FFT; `tests/test_frequency_refinement.py` holds the unit tests.
+- Config/data/logs: JSON configs live at `src/core/config_fft_dynamic.json` and `src/oscillate_dev_settings.json`; data in `csv-data/`; outputs land in `plots/` and `log/` (created on demand). Keep `config_fft_dynamic.json` aligned with any schema changes.
 - Modbus prototype: `modbus-dcs.py` is a standalone RTU/DCS utility; keep changes isolated from FFT code paths.
 
 ## Build, Test, and Development Commands
 - Environment + deps: `python -m venv .venv && source .venv/bin/activate && pip install numpy pandas matplotlib pymodbus pymysql`.
-- Quick FFT sanity: `python FFT_analyzer.py` plots a single-window spectrum.
-- Dynamic FFT pipeline (uses `config_fft_dynamic.json`): `python FFT_dynamic_analyzer.py` or call `FFTDynamicAnalyzer(...).run_pipeline()`.
-- Oscillation dev flow: `python test_oscillation_detection.py --create-config` to scaffold settings; `python test_oscillation_detection.py --mode animation` (default) or `--mode static` to process CSVs.
-- Demo runs: `python test_dynamic_fft.py` executes the scripted examples end-to-end.
+- Quick FFT sanity: `python -m src.FFT_analyzer` plots a single-window spectrum.
+- Dynamic FFT pipeline (uses `src/core/config_fft_dynamic.json`): `python -m src.core.FFT_dynamic_analyzer` or call `FFTDynamicAnalyzer(...).run_pipeline()`.
+- Oscillation dev flow: `python tests/test_oscillation_detection.py --create-config --config src/oscillate_dev_settings.json`; run `--mode animation` (default) or `--mode static` with the same config flag.
+- Demo runs: `python tests/test_dynamic_fft.py` executes the scripted examples end-to-end; `python -m pytest tests/test_frequency_refinement.py` covers the refinement unit tests.
 
 ## Coding Style & Naming Conventions
 - Python 3, PEP8-ish: 4-space indents, snake_case for functions/vars, CapWords for classes.
