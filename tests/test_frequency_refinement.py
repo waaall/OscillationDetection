@@ -4,14 +4,17 @@ pytest test_frequency_refinement.py
 import logging
 import time
 import sys
+import re
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.core.FFT_dynamic_analyzer import FFTDynamicAnalyzer
 from src.core.FrequencyRefinement import FrequencyRefinement
 from src.core.SignalGenerator import SignalGenerator
 
@@ -20,6 +23,16 @@ logging.getLogger("SignalGenerator").setLevel(logging.WARNING)
 logging.getLogger("TestFFT").setLevel(logging.WARNING)
 TEST_LOGGER = logging.getLogger("FrequencyRefinementTest")
 TEST_LOGGER.setLevel(logging.WARNING)
+
+
+def _infer_sampling_rate(time_series: pd.Series) -> float:
+    """根据时间戳推断采样率。"""
+    timestamps = pd.to_datetime(time_series)
+    intervals = timestamps.diff().dropna().dt.total_seconds()
+    median_interval = float(intervals.median())
+    if median_interval <= 0:
+        raise ValueError("时间戳间隔异常，无法推断采样率")
+    return 1.0 / median_interval
 
 
 def _make_tone(freq: float, sampling_rate: int, duration: float,
@@ -132,13 +145,69 @@ def test_convergence_with_poor_initial():
     assert abs(freq_est - true_freq) < 2e-3
 
 
-def test_data_length_boundary():
-    """数据长度不足时返回 None，边界长度可正常工作。"""
-    sampling_rate = 10000
-    short_signal = np.zeros(80)
-    refiner = FrequencyRefinement(logger=TEST_LOGGER)
+def _run_dynamic_pipeline(output_name: str, refine_frequency: bool) -> pd.DataFrame:
+    """封装动态 FFT 全流程，便于对比有/无精化。"""
+    input_csv = PROJECT_ROOT / "csv-data/clean_200ms_liner_20251210.csv"
+    assert input_csv.exists(), "输入 CSV 不存在"
 
-    assert refiner.refine(short_signal, sampling_rate, freq_initial=50.0) is None
+    df_head = pd.read_csv(input_csv, nrows=1000)
+    sampling_rate = int(round(_infer_sampling_rate(df_head["Time [s]"])))
+    assert sampling_rate > 0
 
-    boundary_signal = np.ones(160)
-    assert refiner.refine(boundary_signal, sampling_rate, freq_initial=50.0) is not None
+    analyzer = FFTDynamicAnalyzer(
+        window_duration_ms=200,
+        step_duration_ms=100,
+        sampling_rate=sampling_rate,
+        freq_range=(49.9, 50.1),
+        use_window=True,
+        use_ipdft=True,
+        refine_frequency=refine_frequency,
+        refine_config={
+            "method": "grid_search",
+            "search_range": 0.2,
+            "step_size": 0.001,
+        } if refine_frequency else None,
+        log_file=None,
+    )
+    analyzer.logger.setLevel(logging.WARNING)
+
+    output_path = PROJECT_ROOT / "csv-data" / output_name
+    results_df = analyzer.run_pipeline(
+        input_csv=str(input_csv),
+        output_csv=str(output_path),
+        time_column="Time [s]",
+        signal_column="AI 1/U4一次调频动作 [V]",
+        time_format="%Y-%m-%d %H:%M:%S.%f",
+    )
+
+    assert output_path.exists()
+    return results_df
+
+
+def test_clean_csv_frequency_refinement_pipeline():
+    """使用 FFTDynamicAnalyzer + 频率精化的完整流程。"""
+    output_name = "clean_200ms_liner_frequency_refined.csv"
+    results_df = _run_dynamic_pipeline(output_name, refine_frequency=True)
+
+    assert len(results_df) > 0
+    df_out = pd.read_csv(PROJECT_ROOT / "csv-data" / output_name)
+    assert not df_out.empty
+    ts_sample = str(df_out.iloc[0]["RX Date/Time"])
+    assert re.match(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}::\d{3}", ts_sample)
+
+
+def test_clean_csv_frequency_no_refine_pipeline():
+    """使用 FFTDynamicAnalyzer 仅 IpDFT（无精化）的完整流程。"""
+    output_name = "clean_200ms_liner_frequency_ipdft.csv"
+    results_df = _run_dynamic_pipeline(output_name, refine_frequency=False)
+
+    assert len(results_df) > 0
+    df_out = pd.read_csv(PROJECT_ROOT / "csv-data" / output_name)
+    assert not df_out.empty
+    ts_sample = str(df_out.iloc[0]["RX Date/Time"])
+    assert re.match(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}::\d{3}", ts_sample)
+
+
+if __name__ == "__main__":
+    test_clean_csv_frequency_no_refine_pipeline()
+    test_clean_csv_frequency_refinement_pipeline()

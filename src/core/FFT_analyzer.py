@@ -115,9 +115,10 @@ class FFTAnalyzer:
 
         return signal
 
-    def fft_analyze(self, signal_data: np.ndarray, PLOT_path: str = None, use_window: bool = False,
-                    IpDFT: bool = True, refine_frequency: bool = False,
-                    refine_config: Optional[dict] = None) -> Tuple[bool, Optional[float], Optional[float], Optional[float]]:
+    def fft_analyze(self, signal_data: np.ndarray, PLOT_path: str = None,
+                    use_window: bool = False, refine_frequency: bool = False,
+                    IpDFT: bool = True, refine_config: Optional[dict] = None
+                    ) -> Tuple[bool, Optional[float], Optional[float], Optional[float]]:
         """
         FFT分析函数，支持相量测量（频率、幅值、相位角）
         
@@ -217,7 +218,7 @@ class FFTAnalyzer:
                 self.logger.error(f"绘图失败: {e}")
 
         # 日志输出
-        self.logger.info(f"检测到信号: 频率={peak_freq:.4f}Hz, 幅值={peak_amp:.4f}, "
+        self.logger.debug(f"检测到信号: 频率={peak_freq:.4f}Hz, 幅值={peak_amp:.4f}, "
                          f"相位={np.degrees(peak_phase):.2f}°")
 
         return True, peak_freq, peak_amp, peak_phase

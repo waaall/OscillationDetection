@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Tuple, Optional, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
@@ -46,7 +46,13 @@ class ConfigLoader:
                 "sampling_rate": 10000,
                 "frequency_range": [49.9, 50.1],
                 "use_window": True,
-                "use_ipdft": True
+                "use_ipdft": True,
+                "refine_frequency": True,
+                "refine_config": {
+                    "method": "grid_search",
+                    "search_range": 0.2,
+                    "step_size": 0.001
+                }
             },
             "logging": {
                 "log_file": "./log/fft_dynamic_analyzer.log",
@@ -77,6 +83,8 @@ class FFTDynamicAnalyzer:
                  freq_range: Tuple[float, float] = (49.9, 50.1),
                  use_window: bool = True,
                  use_ipdft: bool = True,
+                 refine_frequency: bool = False,
+                 refine_config: Optional[dict] = None,
                  log_file: Optional[str] = None):
         """
         初始化动态FFT分析器
@@ -88,6 +96,8 @@ class FFTDynamicAnalyzer:
         :param freq_range: 关注的频率范围，用于结果过滤
         :param use_window: FFT分析时是否使用汉宁窗
         :param use_ipdft: 是否使用Jacobsen插值法提高频率精度
+        :param refine_frequency: 是否在 FFT 结果后使用最小二乘精化
+        :param refine_config: 精化参数（透传给 FrequencyRefinement）
         :param log_file: 日志文件路径
         """
         # 加载配置文件（如果提供）
@@ -103,6 +113,8 @@ class FFTDynamicAnalyzer:
             freq_range = tuple(analysis_cfg.get('frequency_range', freq_range))
             use_window = analysis_cfg.get('use_window', use_window)
             use_ipdft = analysis_cfg.get('use_ipdft', use_ipdft)
+            refine_frequency = analysis_cfg.get('refine_frequency', refine_frequency)
+            refine_config = analysis_cfg.get('refine_config', refine_config)
             log_file = logging_cfg.get('log_file', log_file)
 
         # 参数验证
@@ -120,6 +132,8 @@ class FFTDynamicAnalyzer:
         self.freq_range = freq_range
         self.use_window = use_window
         self.use_ipdft = use_ipdft
+        self.refine_frequency = refine_frequency
+        self.refine_config = refine_config or {}
 
         # 计算窗口大小和步长（数据点数）
         self.window_samples = int(sampling_rate * window_duration_ms / 1000)
@@ -132,7 +146,8 @@ class FFTDynamicAnalyzer:
                         f"窗口={window_duration_ms}ms ({self.window_samples}点), "
                         f"步长={step_duration_ms}ms ({self.step_samples}点), "
                         f"采样率={sampling_rate}Hz, "
-                        f"频率范围={freq_range}Hz")
+                        f"频率范围={freq_range}Hz, "
+                        f"精化={'开启' if self.refine_frequency else '关闭'}")
 
     def _setup_logger(self, log_file: Optional[str]):
         """设置日志系统"""
@@ -188,17 +203,13 @@ class FFTDynamicAnalyzer:
         raise ValueError(f"无法解析时间戳: {time_str}")
 
     def _format_timestamp_output(self, dt: datetime) -> str:
-        """
-        格式化时间戳为输出格式
+        """格式为 `YYYY/MM/DD HH:MM:SS::mmm`，毫秒四舍五入。"""
+        milliseconds = int(round(dt.microsecond / 1000.0))
+        if milliseconds >= 1000:
+            dt = dt.replace(microsecond=0) + timedelta(seconds=1)
+            milliseconds = 0
 
-        输入: datetime(2025, 12, 9, 10, 1, 37, 608123)
-        输出: "2025/12/09 10:01:37::608"
-
-        :param dt: datetime对象
-        :return: 格式化的时间字符串
-        """
         date_str = dt.strftime("%Y/%m/%d %H:%M:%S")
-        milliseconds = dt.microsecond // 1000  # 微秒转毫秒
         return f"{date_str}::{milliseconds:03d}"
 
     def _validate_sampling_rate(self, df: pd.DataFrame) -> float:
@@ -350,7 +361,9 @@ class FFTDynamicAnalyzer:
             success, freq, amp, phase = fft_analyzer.fft_analyze(
                 window_data,
                 use_window=self.use_window,
-                IpDFT=self.use_ipdft
+                IpDFT=self.use_ipdft,
+                refine_frequency=self.refine_frequency,
+                refine_config=self.refine_config if self.refine_frequency else None
             )
 
             # 结果过滤（频率范围）
