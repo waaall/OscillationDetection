@@ -14,9 +14,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.FFT_dynamic_analyzer import FFTDynamicAnalyzer
-from src.core.FrequencyRefinement import FrequencyRefinement
-from src.core.SignalGenerator import SignalGenerator
+from src.Freq_dynamic_analyzer import FreqDynamicAnalyzer       # noqa: E402
+from src.core.FrequencyRefinement import FrequencyRefinement    # noqa: E402
+from src.core.SignalGenerator import SignalGenerator            # noqa: E402
 
 # 降低测试日志噪声
 logging.getLogger("SignalGenerator").setLevel(logging.WARNING)
@@ -154,7 +154,7 @@ def _run_dynamic_pipeline(output_name: str, refine_frequency: bool) -> pd.DataFr
     sampling_rate = int(round(_infer_sampling_rate(df_head["Time [s]"])))
     assert sampling_rate > 0
 
-    analyzer = FFTDynamicAnalyzer(
+    analyzer = FreqDynamicAnalyzer(
         window_duration_ms=200,
         step_duration_ms=100,
         sampling_rate=sampling_rate,

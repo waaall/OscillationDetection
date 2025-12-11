@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-基于FFT频域分析的振荡检测工具，适用于电网频率监测和信号分析。项目包含三个独立但相关的分析系统：静态FFT分析、动态FFT分析和长期振荡检测。
+基于FFT频域分析的振荡检测工具，适用于电网频率监测和信号分析。项目包含三个独立但相关的分析系统：静态FFT分析、动态频率分析和长期振荡检测。
 
 ## 核心架构
 
@@ -19,7 +19,7 @@ src/core/SignalGenerator (基础层)
     │       ↓
     │   tests/test_oscillation_detection.py (开发流程)
     │
-    └─→ src/core/FFT_dynamic_analyzer (动态FFT分析)
+    └─→ src/core/FFT_dynamic_analyzer (动态频率分析)
             ↓
         tests/test_dynamic_fft.py (示例/烟囱测试)
 ```
@@ -57,7 +57,7 @@ src/core/SignalGenerator (基础层)
 # 静态FFT分析测试
 python -m src.FFT_analyzer
 
-# 动态FFT分析示例
+# 动态频率分析示例
 python tests/test_dynamic_fft.py
 # 或使用默认配置跑一遍管线
 python -m src.core.FFT_dynamic_analyzer
@@ -93,7 +93,7 @@ gen.insert_into_csv(
 )
 ```
 
-### 动态FFT分析
+### 动态频率分析
 
 ```python
 # 使用配置文件
@@ -176,7 +176,7 @@ gen.insert_into_csv("test.csv", new_signal=signal, use_datetime=True)
 
 ## 配置文件结构
 
-### src/core/config_fft_dynamic.json (动态FFT分析)
+### src/core/config_fft_dynamic.json (动态频率分析)
 
 ```json
 {

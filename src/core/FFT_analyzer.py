@@ -93,7 +93,7 @@ class FFTAnalyzer:
             noise_level=0.0,
             log_file=self._log_file
         )
-            
+
         # 生成基础谐波信号
         signal = generator.harmonic_wave(fundamental_freq=fundamental_freq)
 
@@ -121,7 +121,7 @@ class FFTAnalyzer:
                     ) -> Tuple[bool, Optional[float], Optional[float], Optional[float]]:
         """
         FFT分析函数，支持相量测量（频率、幅值、相位角）
-        
+
         :param signal_data: 输入信号数据
         :param PLOT_path: 绘图保存路径
         :param use_window: 是否使用窗函数
@@ -213,30 +213,31 @@ class FFTAnalyzer:
                     self.logger.warning(f"绘图目录不存在, 将创建: {dir_path}")
                     os.makedirs(dir_path, exist_ok=True)
 
-                self.__plot_comparison(windowed_data, valid_freqs, valid_amps, PLOT_path, peak_freq, peak_amp, peak_phase)
+                self.__plot_comparison(windowed_data, valid_freqs, valid_amps,
+                                       PLOT_path, peak_freq, peak_amp, peak_phase)
             except Exception as e:
                 self.logger.error(f"绘图失败: {e}")
 
         # 日志输出
         self.logger.debug(f"检测到信号: 频率={peak_freq:.4f}Hz, 幅值={peak_amp:.4f}, "
-                         f"相位={np.degrees(peak_phase):.2f}°")
+                          f"相位={np.degrees(peak_phase):.2f}°")
 
         return True, peak_freq, peak_amp, peak_phase
 
-    def calculate_rocof(self, current_freq: float, previous_freq: float, time_interval: Optional[float] = None) -> float:
+    def calculate_rocof(self, current_freq: float, previous_freq: float,
+                        time_interval: Optional[float] = None) -> float:
         """
         计算频率变化率 (Rate of Change of Frequency)
-        
-        :param current_freq: 当前频率 (Hz)
-        :param previous_freq: 上一次频率 (Hz)
-        :param time_interval: 时间间隔 (s)，默认使用窗口时间
-        :return: ROCOF (Hz/s)
+          :param current_freq: 当前频率 (Hz)
+          :param previous_freq: 上一次频率 (Hz)
+          :param time_interval: 时间间隔 (s)，默认使用窗口时间
+          :return: ROCOF (Hz/s)
         """
         if time_interval is None:
             time_interval = self._window_size / self._sampling_rate
-        
+
         rocof = (current_freq - previous_freq) / time_interval
-        self.logger.info(f"ROCOF计算: {current_freq:.4f}Hz - {previous_freq:.4f}Hz / {time_interval:.4f}s = {rocof:.4f}Hz/s")
+        self.logger.info(f"ROCOF: {current_freq:.4f}Hz-{previous_freq:.4f}Hz/{time_interval:.4f}s={rocof:.4f}Hz/s")
         return rocof
 
     def __plot_comparison(self, original_data: np.ndarray,
@@ -261,60 +262,57 @@ class FFTAnalyzer:
         # 先画细浅的曲线
         ax[1].plot(freqs, fft_amps, '-', color='#844784', linewidth=1, alpha=0.3)
         # 再画明显的数据点
-        ax[1].plot(freqs, fft_amps, 'o', color='#844784', markersize=6, 
+        ax[1].plot(freqs, fft_amps, 'o', color='#844784', markersize=6,
                    markeredgewidth=1, markeredgecolor='black', alpha=0.8)
-        
+
         # 设置频率绘图范围
         freq_plot_range = 100  # 可以调整这个值来改变绘图范围
         freq_plot_min = peak_freq - freq_plot_range/2 if peak_freq else self._min_freq
         freq_plot_max = peak_freq + freq_plot_range/2 if peak_freq else self._max_freq
-        
+
         # 确保绘图范围不超出有效频率范围
         freq_plot_min = max(freq_plot_min, self._min_freq)
         freq_plot_max = min(freq_plot_max, self._max_freq)
-        
+
         # 根据绘图范围内的点数量来决定标签密度
         plot_range_mask = (freqs >= freq_plot_min) & (freqs <= freq_plot_max)
-        
+
         # 只为峰值频率点及其左右各3个点添加标签（总共7个点）
         if peak_freq is not None:
             # 找到峰值频率在freqs数组中的索引
             peak_freq_idx = np.argmin(np.abs(freqs - peak_freq))
-            
+
             # 定义要标记的点的索引范围
-            label_indices = range(max(0, peak_freq_idx - 3), 
-                                min(len(freqs), peak_freq_idx + 4))
-            
+            label_indices = range(max(0, peak_freq_idx - 3),
+                                  min(len(freqs), peak_freq_idx + 4))
+
             # 在每个指定点旁边添加数据标签（只有在绘图范围内的才显示）
             for i in label_indices:
                 if plot_range_mask[i]:
                     freq, amp = freqs[i], fft_amps[i]
-                    ax[1].annotate(f'({freq:.1f}, {amp:.3f})', 
-                                  (freq, amp), 
-                                  xytext=(5, 5), 
-                                  textcoords='offset points',
-                                  fontsize=8, 
-                                  alpha=0.7)
-        
+                    ax[1].annotate(f'({freq:.1f}, {amp:.3f})', (freq, amp),
+                                   xytext=(5, 5), textcoords='offset points',
+                                   fontsize=8, alpha=0.7)
+
         ax[1].set_title("Frequency Domain (FFT)")
-        
+
         # 在右上角添加参数信息
         info_text = (f"Δf={self._frequency_resolution:.4f}Hz\n"
-                    f"Precision≈±{self._freq_precision:.4f}Hz"
-                    f"\nPhase={np.degrees(peak_phase):.1f}°")
-            
+                     f"Precision≈±{self._freq_precision:.4f}Hz"
+                     f"\nPhase={np.degrees(peak_phase):.1f}°")
+
         ax[1].text(0.99, 0.96, info_text, transform=ax[1].transAxes,
-                  fontsize=10, verticalalignment='top', horizontalalignment='right',
-                  bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        
+                   fontsize=10, verticalalignment='top', horizontalalignment='right',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
         # 标记峰值点
         if peak_freq is not None and peak_amp is not None:
             label_text = f'Estimated Peak: ({peak_freq:.3f}Hz, {peak_amp:.4f})'
-            ax[1].plot(peak_freq, peak_amp, 'o', markersize=10, 
-                      markerfacecolor='none', markeredgecolor='red', 
-                      markeredgewidth=2, label=label_text)
+            ax[1].plot(peak_freq, peak_amp, 'o', markersize=10,
+                       markerfacecolor='none', markeredgecolor='red',
+                       markeredgewidth=2, label=label_text)
             ax[1].legend()
-        
+
         ax[1].set_xlabel("Frequency (Hz)")
         ax[1].set_ylabel("Amplitude")
         ax[1].grid(True)

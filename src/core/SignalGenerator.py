@@ -99,9 +99,8 @@ class SignalGenerator:
         """返回datetime时间戳数组"""
         return self.timestamps
 
-    def format_timestamp(self,
-                        dt: datetime,
-                        format_str: str = "%Y-%m-%d %H:%M:%S.%f") -> str:
+    def format_timestamp(self, dt: datetime,
+                         format_str: str = "%Y-%m-%d %H:%M:%S.%f") -> str:
         """
         格式化单个时间戳
 
@@ -137,7 +136,7 @@ class SignalGenerator:
                       phases: Optional[Sequence[float]] = None) -> np.ndarray:
         """
         生成包含谐波的信号, 特别针对电网信号优化
-        
+
         :param fundamental_freq: 基频 (Hz), 默认50Hz(电网频率)
         :param num_harmonics: 谐波数量(包括基波), 默认5次
         :param amps: 各谐波幅度, 可以是数组或字符串:
@@ -150,10 +149,10 @@ class SignalGenerator:
             raise ValueError("fundamental_freq 必须为正数")
         if num_harmonics < 1:
             raise ValueError("num_harmonics 必须至少为1")
-            
+
         # 生成谐波频率
         freqs = [fundamental_freq * (i + 1) for i in range(num_harmonics)]
-        
+
         # 处理幅度参数
         if amps is None or amps == 'typical':
             # 典型电网谐波幅度 基波=1.0, 奇次谐波幅度较大, 偶次谐波幅度较小
@@ -164,7 +163,7 @@ class SignalGenerator:
                 4: 0.01,   # 4次谐波
                 5: 0.03,   # 5次谐波
             }
-            
+
             amps = []
             for i in range(1, num_harmonics + 1):
                 if i in typical_amps:
@@ -172,7 +171,7 @@ class SignalGenerator:
                 else:
                     # 对于更高次谐波, 使用近似衰减公式
                     amps.append(0.01 / (i/13)**2)
-                    
+
         elif isinstance(amps, str):
             if amps == 'linear':
                 amps = [1.0 - i * 0.1 for i in range(num_harmonics)]
@@ -183,7 +182,7 @@ class SignalGenerator:
                 raise ValueError("amps 字符串参数只能是 'typical', 'linear' 或 'exponential'")
         elif len(amps) != num_harmonics:
             raise ValueError("amps 长度必须与 num_harmonics 一致")
-            
+
         # 处理相位参数
         if phases is None:
             # 设置典型相位关系：奇次谐波相位接近0, 偶次谐波相位接近π/2
@@ -195,9 +194,9 @@ class SignalGenerator:
                     phases.append(np.pi/2)
         elif len(phases) != num_harmonics:
             raise ValueError("phases 长度必须与 num_harmonics 一致")
-            
+
         self.logger.info(f"生成电网谐波: 基频={fundamental_freq}Hz, 谐波数={num_harmonics}")
-        
+
         return self.sine_wave(freqs, amps, phases)
 
     def linear(self, slope: float = 1.0, intercept: float = 0.0) -> np.ndarray:
@@ -247,7 +246,7 @@ class SignalGenerator:
             if not os.path.exists(csv_path):
                 self.logger.warning(f"文件 {csv_path} 不存在, 新建文件")
                 time_array = [self.format_timestamp(ts, time_format)
-                             for ts in self.timestamps[:len(new_signal)]]
+                              for ts in self.timestamps[:len(new_signal)]]
                 df = pd.DataFrame({
                     "time": time_array,
                     column: new_signal
@@ -265,12 +264,12 @@ class SignalGenerator:
                     df.loc[start_idx:end_idx - 1, column] = new_signal[:end_idx - start_idx]
                     # 更新时间戳
                     time_array = [self.format_timestamp(ts, time_format)
-                                 for ts in self.timestamps[start_idx:end_idx]]
+                                  for ts in self.timestamps[start_idx:end_idx]]
                     df.loc[start_idx:end_idx - 1, "time"] = time_array[:end_idx - start_idx]
                 else:
                     self.logger.info("isCUT=False, 执行追加操作")
                     time_array = [self.format_timestamp(ts, time_format)
-                                 for ts in self.timestamps[:len(new_signal)]]
+                                  for ts in self.timestamps[:len(new_signal)]]
                     df_extra = pd.DataFrame({"time": time_array, column: new_signal})
                     df = pd.concat([df, df_extra], ignore_index=True)
         else:
@@ -301,17 +300,17 @@ class SignalGenerator:
         save_path = save_path or csv_path
         df.to_csv(save_path, index=False)
         self.logger.info(f"信号已写入 {save_path}, 列: {column}, 模式: {'替换' if isCUT else '追加'}, "
-                        f"datetime模式: {use_datetime}")
+                         f"datetime模式: {use_datetime}")
         return df
 
-    def trim_signal(self, signal: np.ndarray, 
+    def trim_signal(self, signal: np.ndarray,
                     n_points: int = 0,
                     frequency: Optional[float] = None,
                     phase_angle: Optional[float] = None,
                     from_end: bool = True) -> np.ndarray:
         """
         裁剪信号的数据点
-        
+
         :param signal: 输入信号
         :param n_points: 要裁剪掉的数据点数量
         :param frequency: 给定频率(Hz), 用于计算基于周期的裁剪点
@@ -321,25 +320,25 @@ class SignalGenerator:
         """
         if len(signal) == 0:
             raise ValueError("输入信号不能为空")
-            
+
         # 计算要裁剪的点数
         if frequency is not None and phase_angle is not None:
             # 基于频率和相位角度计算裁剪点数
             period_samples = int(self._sampling_rate / frequency)
             phase_offset = int((phase_angle / (2 * np.pi)) * period_samples)
-            
+
             # 简单地使用相位偏移作为裁剪点数
             points_to_trim = phase_offset
-            
+
             self.logger.info(f"基于频率{frequency}Hz和相位{phase_angle}弧度计算裁剪点数: {points_to_trim}")
         else:
             # 使用指定的点数
             points_to_trim = n_points
-            
+
         # 执行裁剪
         if points_to_trim >= len(signal):
             raise ValueError("裁剪的点数不能大于等于信号长度")
-            
+
         if points_to_trim <= 0:
             trimmed_signal = signal.copy()
         else:
@@ -349,7 +348,7 @@ class SignalGenerator:
             else:
                 trimmed_signal = signal[points_to_trim:]
                 self.logger.info(f"从信号前面裁剪 {points_to_trim} 个数据点")
-            
+
         return trimmed_signal
 
     def _add_noise(self, signal: np.ndarray) -> np.ndarray:
@@ -377,6 +376,7 @@ def test():
 
     gen.insert_into_csv("./test_data.csv", column="值", start_idx=100,
                         new_signal=trimmed_sig, isCUT=True)
+
 
 if __name__ == "__main__":
     test()

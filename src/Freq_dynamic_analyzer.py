@@ -3,13 +3,18 @@ import sys
 import json
 import logging
 from pathlib import Path
-from typing import List, Tuple, Optional, Callable
+from typing import Tuple, Optional, Callable
 from datetime import datetime, timedelta
-import numpy as np
 import pandas as pd
 
-from src.core.FFT_analyzer import FFTAnalyzer
-from src.core.Zero_Cross_Freq import ZeroCrossFreq
+# 添加项目根目录到Python路径（支持直接运行本文件）
+_current_file = Path(__file__).resolve()
+_project_root = _current_file.parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from src.core.FFT_analyzer import FFTAnalyzer       # noqa: E402
+from src.core.Zero_Cross_Freq import ZeroCrossFreq  # noqa: E402
 
 
 class ConfigLoader:
@@ -75,9 +80,9 @@ class ConfigLoader:
             json.dump(default_config, f, indent=2, ensure_ascii=False)
 
 
-class FFTDynamicAnalyzer:
+class FreqDynamicAnalyzer:
     """
-    动态FFT分析器：使用滑动窗口对时序数据进行连续FFT分析
+    动态频率分析器：使用滑动窗口对时序数据进行连续FFT分析
 
     核心功能：
     1. 读取带datetime时间戳的CSV文件
@@ -100,7 +105,7 @@ class FFTDynamicAnalyzer:
                  refine_config: Optional[dict] = None,
                  log_file: Optional[str] = None):
         """
-        初始化动态FFT分析器
+        初始化动态频率分析器
 
         :param config_path: JSON配置文件路径，若提供则覆盖其他参数
         :param window_duration_ms: 分析窗口时长(毫秒)，默认200ms
@@ -109,11 +114,16 @@ class FFTDynamicAnalyzer:
         :param freq_range: 关注的频率范围，用于结果过滤
         :param use_window: FFT分析时是否使用汉宁窗
         :param use_ipdft: 是否使用Jacobsen插值法提高频率精度
-        :param use_zero_crossing: 是否使用过零检测替代FFT
+        :param use_zero_crossing: 是否使用过零检测替代FFT（默认False）
         :param zero_cross_config: 过零检测配置（透传给ZeroCrossFreq）
         :param refine_frequency: 是否在 FFT 结果后使用最小二乘精化
         :param refine_config: 精化参数（透传给 FrequencyRefinement）
         :param log_file: 日志文件路径
+
+        频率估计算法优先级（从高到低）：
+        1. analyze_dynamic(use_zero_crossing=xxx) 运行时参数（最高优先级）
+        2. config.json 中的 "use_zero_crossing" 配置项
+        3. 初始化参数 use_zero_crossing（最低优先级，默认False使用FFT）
         """
         # 加载配置文件（如果提供）
         self.config = None
@@ -192,7 +202,7 @@ class FFTDynamicAnalyzer:
             file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
             file_handler.setLevel(logging.INFO)
             file_formatter = logging.Formatter('[%(asctime)s] %(message)s',
-                                              datefmt='%Y-%m-%d %H:%M:%S')
+                                               datefmt='%Y-%m-%d %H:%M:%S')
             file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
 
@@ -270,7 +280,7 @@ class FFTDynamicAnalyzer:
             )
 
         self.logger.info(f"采样率验证: 实际={actual_sampling_rate:.2f}Hz, "
-                        f"间隔均值={mean_interval*1000:.3f}ms")
+                         f"间隔均值={mean_interval*1000:.3f}ms")
 
         return actual_sampling_rate
 
@@ -340,16 +350,15 @@ class FFTDynamicAnalyzer:
 
         return result_df
 
-    def analyze_dynamic(self,
-                       df: pd.DataFrame,
-                       progress_callback: Optional[Callable] = None,
-                       use_zero_crossing: Optional[bool] = None) -> pd.DataFrame:
+    def analyze_dynamic(self, df: pd.DataFrame,
+                        progress_callback: Optional[Callable] = None,
+                        use_zero_crossing: Optional[bool] = None) -> pd.DataFrame:
         """
         动态滑窗频率分析（FFT或过零检测）
 
         :param df: 输入DataFrame (columns: ['timestamp', 'signal'])
         :param progress_callback: 进度回调函数 callback(current, total)
-        :param use_zero_crossing: 是否使用过零检测替代FFT（覆盖实例默认值）
+        :param use_zero_crossing: 是否使用过零检测替代FFT（覆盖实例默认值，最高优先级）
         :return: 结果DataFrame (columns: ['timestamp', 'frequency', 'amplitude', 'phase'])
         """
         # 检查数据长度
@@ -360,7 +369,7 @@ class FFTDynamicAnalyzer:
             )
             return pd.DataFrame(columns=['timestamp', 'frequency', 'amplitude', 'phase'])
 
-        # 选择频率估计器
+        # 选择频率估计器（优先级：运行时参数 > 实例配置）
         zero_cross_flag = self.use_zero_crossing if use_zero_crossing is None else bool(use_zero_crossing)
         if zero_cross_flag:
             analyzer = ZeroCrossFreq(
@@ -422,12 +431,10 @@ class FFTDynamicAnalyzer:
 
         return pd.DataFrame(results)
 
-    def save_results(self,
-                    results_df: pd.DataFrame,
-                    output_path: str,
-                    frequency_decimals: int = None,
-                    amplitude_decimals: int = None,
-                    phase_decimals: int = None) -> None:
+    def save_results(self, results_df: pd.DataFrame, output_path: str,
+                     frequency_decimals: int = None,
+                     amplitude_decimals: int = None,
+                     phase_decimals: int = None) -> None:
         """
         保存分析结果到CSV
 
@@ -471,10 +478,8 @@ class FFTDynamicAnalyzer:
         output_df.to_csv(output_path, index=False)
         self.logger.info(f"结果已保存至: {output_path} ({len(output_df)} 行)")
 
-    def run_pipeline(self,
-                    input_csv: str = None,
-                    output_csv: str = None,
-                    **csv_params) -> pd.DataFrame:
+    def run_pipeline(self, input_csv: str = None, output_csv: str = None,
+                     **csv_params) -> pd.DataFrame:
         """
         完整分析流程
 
@@ -513,10 +518,10 @@ class FFTDynamicAnalyzer:
 
 # ===================== 测试 =====================
 def test_dynamic_analyzer():
-    """测试动态FFT分析器"""
+    """测试动态频率分析器"""
     # 使用与模块同目录的配置文件
     config_path = Path(__file__).with_name("config_fft_dynamic.json")
-    analyzer = FFTDynamicAnalyzer(config_path=str(config_path))
+    analyzer = FreqDynamicAnalyzer(config_path=str(config_path))
 
     # 运行完整流程
     results = analyzer.run_pipeline()
@@ -527,5 +532,50 @@ def test_dynamic_analyzer():
         print(results.head())
 
 
+def test_zc_analyzer():
+    """
+    使用过零(ZC)算法计算频率并输出前几行结果。
+
+    优先使用同目录的 config_fft_dynamic.json；若不存在，则直接读取
+    clean_200ms_liner_20251210.csv，时间列为 Time [s]，信号列为
+    AI 1/U4一次调频动作 [V]。
+    """
+    config_path = Path(__file__).with_name("config_fft_dynamic.json")
+    sample_csv = Path(__file__).with_name("clean_200ms_liner_20251210.csv")
+
+    if config_path.exists():
+        analyzer = FreqDynamicAnalyzer(config_path=str(config_path))
+        results = analyzer.run_pipeline()
+    else:
+        if not sample_csv.exists():
+            raise FileNotFoundError(
+                "示例CSV不存在，同时未找到配置文件。"
+                "请提供 config_fft_dynamic.json 或 clean_200ms_liner_20251210.csv"
+            )
+
+        # 使用默认参数+示例CSV运行ZC分析（不保存文件）
+        analyzer = FreqDynamicAnalyzer(
+            window_duration_ms=200,
+            step_duration_ms=100,
+            sampling_rate=10000,
+            freq_range=(45.0, 65.0),
+            use_window=False,
+            use_ipdft=False,
+            refine_frequency=False,
+        )
+        df = analyzer.load_csv(
+            str(sample_csv),
+            time_column="Time [s]",
+            signal_column="AI 1/U4一次调频动作 [V]",
+        )
+        results = analyzer.analyze_dynamic(df)
+
+    print(f"\nZC频率分析完成，共 {len(results)} 个窗口结果")
+    if len(results) > 0:
+        print("\n前5个结果(时间戳, 频率[Hz]):")
+        print(results[['timestamp', 'frequency']].head())
+
+
 if __name__ == "__main__":
-    test_dynamic_analyzer()
+    # test_dynamic_analyzer()
+    test_zc_analyzer()

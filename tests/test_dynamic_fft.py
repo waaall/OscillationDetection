@@ -1,5 +1,5 @@
 """
-动态FFT分析系统使用示例
+动态频率分析系统使用示例
 
 演示如何使用FFTDynamicAnalyzer和SignalGenerator进行动态频率分析
 """
@@ -13,8 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.FFT_dynamic_analyzer import FFTDynamicAnalyzer
-from src.core.SignalGenerator import SignalGenerator
+from src.Freq_dynamic_analyzer import FreqDynamicAnalyzer       # noqa: E402
+from src.core.SignalGenerator import SignalGenerator            # noqa: E402
 
 
 def example1_generate_test_signal():
@@ -35,7 +35,7 @@ def example1_generate_test_signal():
 
     # 保存为datetime格式的CSV
     gen.insert_into_csv(
-        'csv-data/example_input.csv',
+        './csv-data/example_input.csv',
         column='signal',
         new_signal=signal,
         use_datetime=True,
@@ -43,7 +43,7 @@ def example1_generate_test_signal():
     )
 
     print(f"\n✓ 测试信号已生成：{len(signal)} 个数据点")
-    print("✓ 已保存至: csv-data/example_input.csv")
+    print("✓ 已保存至: ./csv-data/example_input.csv")
 
 
 def example2_analyze_with_config():
@@ -54,8 +54,8 @@ def example2_analyze_with_config():
 
     # 使用配置文件
     project_root = Path(__file__).resolve().parents[1]
-    config_path = project_root / "src" / "core" / "config_fft_dynamic.json"
-    analyzer = FFTDynamicAnalyzer(config_path=str(config_path))
+    config_path = project_root / "src" / "config_fft_dynamic.json"
+    analyzer = FreqDynamicAnalyzer(config_path=str(config_path))
 
     # 运行完整流程
     results = analyzer.run_pipeline()
@@ -73,7 +73,7 @@ def example3_analyze_programmatically():
     print("=" * 60)
 
     # 不使用配置文件，直接设置参数
-    analyzer = FFTDynamicAnalyzer(
+    analyzer = FreqDynamicAnalyzer(
         window_duration_ms=200,    # 200ms窗口
         step_duration_ms=100,       # 100ms步长
         sampling_rate=10000,        # 10kHz采样率
@@ -83,9 +83,9 @@ def example3_analyze_programmatically():
         log_file='./log/example.log'
     )
 
-    # 分步执行
+    # 分步执行（使用example1生成的文件）
     df = analyzer.load_csv(
-        'csv-data/test_dynamic_input.csv',
+        './csv-data/example_input.csv',
         time_column='time',
         signal_column='signal'
     )
@@ -94,11 +94,11 @@ def example3_analyze_programmatically():
 
     analyzer.save_results(
         results_df,
-        'csv-data/example_output.csv'
+        './csv-data/example_output.csv'
     )
 
     print(f"\n✓ 分析完成：{len(results_df)} 个窗口")
-    print("✓ 结果已保存至: csv-data/example_output.csv")
+    print("✓ 结果已保存至: ./csv-data/example_output.csv")
 
 
 def example4_backward_compatibility():
@@ -146,7 +146,7 @@ def example5_zero_crossing_mode():
         "signal": signal
     })
 
-    analyzer = FFTDynamicAnalyzer(
+    analyzer = FreqDynamicAnalyzer(
         window_duration_ms=200,
         step_duration_ms=100,
         sampling_rate=sampling_rate,
@@ -176,7 +176,7 @@ def example5_zero_crossing_mode():
 def main():
     """主函数：运行所有示例"""
     print("\n" + "=" * 60)
-    print("动态FFT分析系统使用示例")
+    print("动态频率分析系统使用示例")
     print("=" * 60)
 
     # 运行所有示例

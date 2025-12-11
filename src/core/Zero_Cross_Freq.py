@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -267,8 +267,3 @@ class ZeroCrossFreq:
         self.valid_count += 1
         phase = self._estimate_phase(crossings[0])
         return True, float(freq_hz), float(amplitude), float(phase)
-
-
-# Alias for backward compatibility with the existing import name.
-ZeroCross = ZeroCrossFreq
-

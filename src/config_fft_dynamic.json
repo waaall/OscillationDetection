@@ -20,8 +20,10 @@
     "frequency_range": [49.9, 50.1],
     "use_window": true,
     "use_ipdft": true,
-    "use_zero_crossing": false,
+    "_comment_use_zero_crossing": "false=FFT分析, true=过零检测",
+    "use_zero_crossing": true,
     "zero_cross_config": {
+      "_comment": "过零检测(ZC)配置, 仅当use_zero_crossing=true时生效",
       "window_periods": 6,
       "min_freq_hz": 45.0,
       "max_freq_hz": 65.0,
@@ -43,5 +45,5 @@
     "log_level": "INFO"
   },
 
-  "description": "动态FFT分析配置：200ms窗口，100ms步长，10kHz采样率，关注50Hz频率"
+  "description": "动态频率分析配置: 200ms窗口, 100ms步长, 10kHz采样率, 关注50Hz频率"
 }

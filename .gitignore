@@ -5,7 +5,6 @@ __pycache__/
 
 # project
 /csv-data
-oscillate_dev_settings.json
 *.png
 
 # C extensions

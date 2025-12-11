@@ -1,0 +1,20 @@
+{
+    "csv_file": "csv-data/data.csv",
+    "window_size": 100,
+    "sampling_rate": 1000,
+    "threshold": 0.5,
+    "overlap_ratio": 0.1,
+    "log_file": "./log/oscillation_dev.log",
+    "generate_signal": true,
+    "generate_duration": 600,
+    "noise_level": 0.1,
+    "sin_freqs": [25, 50],
+    "sin_amps": [0.3, 1.0],
+    "sin_phases": [0.0, 0.0],
+    "linear_slope": 0.0,
+    "linear_intercept": 0.0,
+    "polynomial_parms": [0.0, 0.0, 0.0],
+    "exponential_amps": 0.0,
+    "exponential_tau": 0.0,
+    "description": "test oscillation detection settings with signal generation"
+}
