@@ -71,7 +71,7 @@ class ConfigLoader:
                 }
             },
             "logging": {
-                "log_file": "./log/fft_dynamic_analyzer.log",
+                "log_file": "./log/Freq_dynamic_analyzer.log",
                 "log_level": "INFO"
             }
         }

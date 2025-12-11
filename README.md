@@ -7,15 +7,17 @@
 ```
 ├── src/
 │   ├── __init__.py
-│   ├── FFT_analyzer.py                 # 入口脚本(调用 core 版本)
+│   ├── Freq_dynamic_analyzer.py        # 动态频率分析器
+│   ├── OscillationDetection.py         # 振荡检测核心
+│   ├── config_fft_dynamic.json         # 动态频率配置
 │   ├── oscillate_dev_settings.json     # 振荡检测配置
+│   ├── com/
+│   │   └── modbus-dcs.py               # Modbus RTU 原型（独立）
 │   └── core/
 │       ├── FFT_analyzer.py             # 单次FFT分析
-│       ├── FFT_dynamic_analyzer.py     # 动态频率分析器
 │       ├── FrequencyRefinement.py      # 频率精细化
-│       ├── OscillationDetection.py     # 振荡检测核心
 │       ├── SignalGenerator.py          # 信号生成器
-│       └── config_fft_dynamic.json     # 动态频率配置
+│       └── Zero_Cross_Freq.py          # 过零检测工具
 ├── tests/
 │   ├── test_dynamic_fft.py             # 动态频率示例/烟囱测试
 │   ├── test_frequency_refinement.py    # 频率精细化单元测试
@@ -24,8 +26,7 @@
 ├── plots/                              # 绘图输出目录
 ├── log/                                # 日志输出目录
 ├── docs/                               # 说明文档
-├── AGENTS.md / CLAUDE.md / README.md   # 项目文档
-└── modbus-dcs.py                       # Modbus RTU 原型（独立）
+└── AGENTS.md / CLAUDE.md / README.md   # 项目文档
 ```
 
 ## 核心功能
@@ -53,7 +54,7 @@ analyzer = FFTAnalyzer(window_size=800, sampling_rate=10000)
 signal = analyzer.generate_test_signal(fundamental_freq=50.02)
 
 # FFT分析
-detected, freq, amp = analyzer.fft_analyze(signal, PLOT_path="result.png")
+detected, freq, amp, phase = analyzer.fft_analyze(signal, PLOT_path="result.png")
 ```
 
 #### 1.1 频率精细化（最小二乘拟合）
@@ -96,14 +97,14 @@ success, freq, amp, phase = analyzer.fft_analyze(
 **使用示例**:
 
 ```python
-from src.core.FFT_dynamic_analyzer import FFTDynamicAnalyzer
+from src.Freq_dynamic_analyzer import FreqDynamicAnalyzer
 
 # 方式1: 配置文件启用ZC
-analyzer = FFTDynamicAnalyzer(config_path="config.json")
-# 在 config.json 中设置 "use_zero_crossing": true
+analyzer = FreqDynamicAnalyzer(config_path="src/config_fft_dynamic.json")
+# 在 config_fft_dynamic.json 中设置 "use_zero_crossing": true
 
 # 方式2: 初始化时启用ZC
-analyzer = FFTDynamicAnalyzer(
+analyzer = FreqDynamicAnalyzer(
     use_zero_crossing=True,
     zero_cross_config={
         "window_periods": 6,         # 窗口包含周期数
@@ -120,8 +121,8 @@ results = analyzer.analyze_dynamic(df, use_zero_crossing=True)
 
 **算法优先级**（从高到低）:
 1. `analyze_dynamic(use_zero_crossing=True/False)` - 运行时参数（最高优先级）
-2. `config.json` 中的 `"use_zero_crossing"` - 配置文件
-3. `FFTDynamicAnalyzer(use_zero_crossing=...)` - 初始化参数（默认 `False`）
+2. `config_fft_dynamic.json` 中的 `"use_zero_crossing"` - 配置文件
+3. `FreqDynamicAnalyzer(use_zero_crossing=...)` - 初始化参数（默认 `False`）
 
 **ZC vs FFT对比**:
 
@@ -157,7 +158,7 @@ python tests/test_oscillation_detection.py --mode animation --config src/oscilla
 python tests/test_oscillation_detection.py --mode static --config src/oscillate_dev_settings.json
 ```
 
-### 3. 动态频率分析器 (`src/core/FFT_dynamic_analyzer.py`) **[新增]**
+### 3. 动态频率分析器 (`src/Freq_dynamic_analyzer.py`) **[新增]**
 
 **用途**: 对带datetime时间戳的CSV文件进行连续滑窗FFT分析，适用于动态频率变化分析
 
@@ -182,32 +183,8 @@ RX Date/Time,组/A_Freq
 2025/12/09 10:01:37::722,50.000
 ```
 
-**使用示例**:
 
-```python
-from src.core.FFT_dynamic_analyzer import FFTDynamicAnalyzer
 
-# 方式1: 使用配置文件（推荐）
-analyzer = FFTDynamicAnalyzer(config_path="src/core/config_fft_dynamic.json")
-results = analyzer.run_pipeline()
-
-# 方式2: 编程式配置
-analyzer = FFTDynamicAnalyzer(
-    window_duration_ms=200,
-    step_duration_ms=100,
-    sampling_rate=10000,
-    freq_range=(49.9, 50.1)
-)
-df = analyzer.load_csv("input.csv")
-results_df = analyzer.analyze_dynamic(df)
-analyzer.save_results(results_df, "output.csv")
-```
-
-**运行示例脚本**:
-```bash
-python tests/test_dynamic_fft.py          # 运行示例流程
-python -m src.core.FFT_dynamic_analyzer   # 使用默认配置跑一遍管线
-```
 
 ## 配置说明
 
@@ -290,7 +267,7 @@ pip install pymodbus pymysql
 ## 快速开始
 
 1. **FFT分析**: 运行 `python -m src.FFT_analyzer`
-2. **动态频率分析** **[新增]**: 运行 `python tests/test_dynamic_fft.py` 查看完整示例，或 `python -m src.core.FFT_dynamic_analyzer` 用配置跑管线
+2. **动态频率分析** **[新增]**: 运行 `python tests/test_dynamic_fft.py` 查看完整示例，或 `python -m src.Freq_dynamic_analyzer` 用配置跑管线
 3. **振荡检测**: 运行 `python tests/test_oscillation_detection.py --create-config --config src/oscillate_dev_settings.json` 后编辑配置文件
 4. **信号生成**: 使用 `from src.core.SignalGenerator import SignalGenerator` 创建测试信号（现已支持datetime时间戳）
 
@@ -306,7 +283,7 @@ pip install pymodbus pymysql
 ### v2.0 - 动态频率分析系统 (2025-12-10)
 
 **新增功能**:
-- ✅ `src/core/FFT_dynamic_analyzer.py`: 动态频率分析器，支持滑动窗口连续分析
+- ✅ `src/Freq_dynamic_analyzer.py`: 动态频率分析器，支持滑动窗口连续分析
 - ✅ `src/core/SignalGenerator.py`: 添加datetime时间戳支持（完全向后兼容）
 - ✅ `src/core/config_fft_dynamic.json`: 模块化JSON配置系统
 - ✅ `tests/test_dynamic_fft.py`: 完整使用示例脚本

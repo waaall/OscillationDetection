@@ -12,14 +12,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 src/core/SignalGenerator (基础层)
-    ↓ 被所有模块使用
-    ├─→ src/core/FFT_analyzer (单次FFT分析)
+    ↓ 被示例/测试使用
+    ├─→ src/core/FFT_analyzer (单次FFT分析/精细化)
     │       ↓
-    │   src/core/OscillationDetection (长期振荡检测)
+    │   src/OscillationDetection (长期振荡检测)
     │       ↓
     │   tests/test_oscillation_detection.py (开发流程)
     │
-    └─→ src/core/FFT_dynamic_analyzer (动态频率分析)
+    └─→ src/Freq_dynamic_analyzer (动态频率分析，依赖 Zero_Cross_Freq/FrequencyRefinement)
             ↓
         tests/test_dynamic_fft.py (示例/烟囱测试)
 ```
@@ -29,7 +29,7 @@ src/core/SignalGenerator (基础层)
 | 模式 | 采样率 | 窗口大小 | 用途 | 输入格式 |
 |------|--------|---------|------|---------|
 | **FFT_analyzer** | 10kHz | 800点(0.08s) | 静态信号质量分析 | numpy数组 |
-| **FFT_dynamic_analyzer** | 可配置(默认10kHz) | 可配置(默认200ms) | 动态频率跟踪 | CSV+datetime时间戳 |
+| **Freq_dynamic_analyzer** | 可配置(默认10kHz) | 可配置(默认200ms) | 动态频率跟踪 | CSV+datetime时间戳 |
 | **OscillationDetection** | 1Hz | 60点(60s) | 长期振荡监测 | CSV |
 
 ### 关键设计模式
@@ -55,12 +55,12 @@ src/core/SignalGenerator (基础层)
 
 ```bash
 # 静态FFT分析测试
-python -m src.FFT_analyzer
+python -m src.core.FFT_analyzer
 
 # 动态频率分析示例
 python tests/test_dynamic_fft.py
 # 或使用默认配置跑一遍管线
-python -m src.core.FFT_dynamic_analyzer
+python -m src.Freq_dynamic_analyzer
 
 # 振荡检测 - 创建配置文件模板
 python tests/test_oscillation_detection.py --create-config --config src/oscillate_dev_settings.json
@@ -97,13 +97,13 @@ gen.insert_into_csv(
 
 ```python
 # 使用配置文件
-from src.core.FFT_dynamic_analyzer import FFTDynamicAnalyzer
+from src.Freq_dynamic_analyzer import FreqDynamicAnalyzer
 
-analyzer = FFTDynamicAnalyzer(config_path="src/core/config_fft_dynamic.json")
+analyzer = FreqDynamicAnalyzer(config_path="src/config_fft_dynamic.json")
 results = analyzer.run_pipeline()
 
 # 编程式配置
-analyzer = FFTDynamicAnalyzer(
+analyzer = FreqDynamicAnalyzer(
     window_duration_ms=200,
     step_duration_ms=100,
     sampling_rate=10000,
@@ -176,18 +176,18 @@ gen.insert_into_csv("test.csv", new_signal=signal, use_datetime=True)
 
 ## 配置文件结构
 
-### src/core/config_fft_dynamic.json (动态频率分析)
+### src/config_fft_dynamic.json (动态频率分析)
 
 ```json
 {
   "input": {
-    "csv_path": "csv-data/input.csv",
+    "csv_path": "csv-data/clean_200ms_liner_20251210.csv",
     "time_column": "Time [s]",
-    "signal_column": "signal",
+    "signal_column": "AI 1/U4一次调频动作 [V]",
     "time_format": "%Y-%m-%d %H:%M:%S.%f"
   },
   "output": {
-    "csv_path": "csv-data/output.csv",
+    "csv_path": "csv-data/fft_analysis_results.csv",
     "frequency_decimals": 3,
     "amplitude_decimals": 4,
     "phase_decimals": 2
@@ -198,12 +198,29 @@ gen.insert_into_csv("test.csv", new_signal=signal, use_datetime=True)
     "sampling_rate": 10000,
     "frequency_range": [49.9, 50.1],
     "use_window": true,
-    "use_ipdft": true
+    "use_ipdft": true,
+    "use_zero_crossing": true,
+    "zero_cross_config": {
+      "window_periods": 6,
+      "min_freq_hz": 45.0,
+      "max_freq_hz": 65.0,
+      "fake_period_ms": 0.0,
+      "min_cross_amplitude": 0.0,
+      "remove_dc": true,
+      "rising_only": true
+    },
+    "refine_frequency": true,
+    "refine_config": {
+      "method": "grid_search",
+      "search_range": 0.2,
+      "step_size": 0.001
+    }
   },
   "logging": {
-    "log_file": "./log/fft_dynamic_analyzer.log",
+    "log_file": "./log/Freq_dynamic_analyzer.log",
     "log_level": "INFO"
-  }
+  },
+  "description": "动态频率分析配置: 200ms窗口, 100ms步长, 10kHz采样率, 关注50Hz频率"
 }
 ```
 
@@ -223,7 +240,7 @@ gen.insert_into_csv("test.csv", new_signal=signal, use_datetime=True)
 
 示例：
 - FFT_analyzer: 10000Hz / 800 = 12.5Hz
-- FFT_dynamic_analyzer: 10000Hz / 2000 = 5Hz (200ms窗口)
+- Freq_dynamic_analyzer: 10000Hz / 2000 = 5Hz (200ms窗口)
 - OscillationDetection: 1Hz / 60 = 0.0167Hz
 ```
 
@@ -285,7 +302,7 @@ success, freq, amp, phase = analyzer.fft_analyze(
 
 ## 边界情况处理
 
-### FFT_dynamic_analyzer 边界处理
+### Freq_dynamic_analyzer 边界处理
 
 | 情况 | 处理方式 |
 |------|---------|
@@ -298,8 +315,11 @@ success, freq, amp, phase = analyzer.fft_analyze(
 ## 文件组织
 
 ```
-src/core/           # 核心算法与配置 (config_fft_dynamic.json 等)
-src/oscillate_dev_settings.json  # 振荡检测默认配置
+src/                # 核心代码与配置 (config_fft_dynamic.json, oscillate_dev_settings.json)
+src/core/           # FFT_analyzer、SignalGenerator、Zero_Cross_Freq、FrequencyRefinement
+src/Freq_dynamic_analyzer.py     # 动态频率分析入口
+src/OscillationDetection.py      # 振荡检测核心
+src/com/modbus-dcs.py            # Modbus RTU 原型
 tests/              # 示例/测试脚本 (test_dynamic_fft.py 等)
 csv-data/           # CSV数据目录
 log/                # 日志目录（自动创建）
