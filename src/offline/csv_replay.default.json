@@ -1,0 +1,28 @@
+{
+  "input": {
+    "csv_path": "csv-data/input.csv",
+    "time_column": "timestamp",
+    "value_column": "signal",
+    "timestamp_format": "%Y-%m-%d %H:%M:%S.%f",
+    "has_timestamp": true
+  },
+  "analysis": {
+    "sampling_rate_hz": 1.0,
+    "target_freq_range_hz": [0.0167, 0.2],
+    "window_duration_s": 180.0,
+    "amplitude_threshold": 0.5,
+    "allow_resample": false
+  },
+  "replay": {
+    "step_duration_s": 1.0
+  },
+  "output": {
+    "result_csv_path": "csv-data/output.csv",
+    "include_plot": true,
+    "plot_dir": "plots"
+  },
+  "logging": {
+    "log_file": "./log/csv_replay.log",
+    "log_level": "INFO"
+  }
+}

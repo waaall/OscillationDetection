@@ -1,411 +1,72 @@
-import os
+from __future__ import annotations
+
 import sys
-import logging
-import json
-import argparse
-from typing import List, Dict, Optional
 from pathlib import Path
+
 import numpy as np
+import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.SignalGenerator import SignalGenerator            # noqa: E402
-from src.OscillationDetection import OscillationDetection  # noqa: E402
+from src.offline.csv_replay import CsvReplay  # noqa: E402
+from src.offline.result_visualizer import ResultVisualizer  # noqa: E402
+from src.offline import SignalGenerator  # noqa: E402
 
 
-DEFAULT_CONFIG = PROJECT_ROOT / "src" / "oscillate_dev_settings.json"
-
-
-class ODDevFlow:
-    def __init__(self, config_file: str = str(DEFAULT_CONFIG)):
-        """
-        振荡检测开发流程主类
-
-        Args:
-            config_file: 配置文件路径
-        """
-
-        # 加载配置
-        self.config = self._load_and_validate_config(config_file)
-
-        # 从配置文件读取参数
-        self.csv_file = self.config.get('csv_file', './csv-data/test.csv')
-        self.window_size = self.config.get('window_size', 60)
-        self.sampling_rate = self.config.get('sampling_rate', 1.0)
-        self._threshold = self.config.get('threshold', 0.5)
-        self._overlap_ratio = self.config.get('overlap_ratio', 0.5)
-        self.log_file = self.config.get('log_file', None)
-
-        # 信号生成相关参数
-        self._generate_signal = self.config.get('generate_signal', False)
-        self._generate_duration = self.config.get('generate_duration', 10)
-        self._noise_level = self.config.get('noise_level', 0.1)
-        self._sin_freqs = self.config.get('sin_freqs', [0.1, 0.5])
-        self._sin_amps = self.config.get('sin_amps', [1.0, 1.0])
-        self._sin_phases = self.config.get('sin_phases', [0.0, 0.0])
-        self._linear_slope = self.config.get('linear_slope', 0.2)
-        self._linear_intercept = self.config.get('linear_intercept', 1.0)
-        self._polynomial_parms = self.config.get('polynomial_parms', [1.0, 0.0, 0.0])
-        self._exponential_amps = self.config.get('exponential_amps', 0.0)
-        self._exponential_tau = self.config.get('exponential_tau', 0.0)
-
-        # 设置完整的日志系统
-        self._setup_logger()
-
-        # 确保CSV文件的目录存在
-        csv_dir = os.path.dirname(self.csv_file)
-        if csv_dir:
-            os.makedirs(csv_dir, exist_ok=True)
-
-        self.logger.info("ODDevFlow 初始化完成")
-        self.logger.info(f"配置参数: generate_signal={self._generate_signal}, "
-                         f"window_size={self.window_size}, sampling_rate={self.sampling_rate}")
-
-    def _setup_logger(self):
-        """设置基础日志系统"""
-        self.logger = logging.getLogger('ODDevFlow')
-        self.logger.setLevel(logging.INFO)
-
-        # 清除现有的处理器
-        self.logger.handlers.clear()
-
-        # 创建控制台处理器
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter('[%(levelname)s] %(message)s')
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
-
-        # 创建文件处理器（如果指定了日志文件）
-        if self.log_file:
-            try:
-                # 确保日志目录存在
-                log_dir = os.path.dirname(self.log_file)
-                if log_dir:
-                    os.makedirs(log_dir, exist_ok=True)
-
-                file_handler = logging.FileHandler(self.log_file, mode='w', encoding='utf-8')
-                file_handler.setLevel(logging.INFO)
-                file_formatter = logging.Formatter('[%(asctime)s] %(message)s',
-                                                   datefmt='%Y-%m-%d %H:%M:%S')
-                file_handler.setFormatter(file_formatter)
-                self.logger.addHandler(file_handler)
-                self.logger.info(f"日志文件设置为: {self.log_file}")
-            except Exception as e:
-                self.logger.warning(f"无法创建日志文件 {self.log_file}: {e}")
-
-        # 禁用传播到根logger
-        self.logger.propagate = True
-
-    def _load_and_validate_config(self, config_file: str) -> dict:
-        """
-        加载和验证配置文件, 如果不存在则自动创建模板
-
-        Args:
-            config_file: 配置文件路径
-
-        Returns:
-            dict: 配置字典
-        """
-        config_path = Path(config_file)
-
-        # 如果配置文件不存在, 创建模板并提示用户
-        if not config_path.exists():
-            print(f"配置文件 {config_file} 不存在")
-            print("正在创建默认配置文件模板...")
-
-            self.save_config_template(config_file)
-
-            print("==========================================")
-            print(f"已自动生成配置文件: {config_file}")
-            print("请编辑该文件设置您的参数:")
-            print("- generate_signal: 是否生成测试信号")
-            print("- csv_file: CSV数据文件路径")
-            print("- window_size, sampling_rate, threshold: 检测参数")
-            print("编辑完成后重新运行程序")
-            print("==========================================")
-            sys.exit(0)
-
-        # 加载配置文件
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config_content = f.read().strip()
-                if not config_content:
-                    self.logger.error(f"[ERROR] 配置文件 {config_file} 为空")
-                    sys.exit(1)
-
-                config = json.loads(config_content)
-                print(f"[CONFIG] 已加载配置文件: {config_file}")
-                return config
-
-        except json.JSONDecodeError as e:
-            print(f"[ERROR] 配置文件 {config_file} 格式错误: {e}")
-            sys.exit(1)
-        except Exception as e:
-            print(f"[ERROR] 读取配置文件 {config_file} 失败: {e}")
-            sys.exit(1)
-
-    @staticmethod
-    def save_config_template(config_file: str = str(DEFAULT_CONFIG)) -> None:
-        """
-        保存完整的配置文件模板
-
-        Args:
-            config_file: 配置文件路径
-        """
-        template_config = {
-            "csv_file": "./csv-data/test.csv",
-            "window_size": 60,
-            "sampling_rate": 1.0,
-            "threshold": 0.5,
-            "overlap_ratio": 0.1,
-            "log_file": None,
-            "generate_signal": False,
-            "generate_duration": 10,
-            "noise_level": 0.1,
-            "sin_freqs": [0.1, 0.5],
-            "sin_amps": [1.0, 1.0],
-            "sin_phases": [0.0, 0.0],
-            "linear_slope": 0.2,
-            "linear_intercept": 1.0,
-            "polynomial_parms": [1.0, 0.0, 0.0],
-            "exponential_amps": 0.0,
-            "exponential_tau": 0.0,
-            "description": "test oscillation detection settings",
+def test_visualizer_generates_summary_and_spectrum_plots(tmp_path: Path):
+    sampling_rate_hz = 10.0
+    sample_count = 120
+    time_axis = np.arange(sample_count) / sampling_rate_hz
+    signal = np.sin(2 * np.pi * 0.5 * time_axis)
+    timestamps = pd.Timestamp("2026-03-14T10:00:00") + pd.to_timedelta(time_axis, unit="s")
+    input_csv = tmp_path / "input.csv"
+    pd.DataFrame(
+        {
+            "timestamp": timestamps.strftime("%Y-%m-%d %H:%M:%S.%f"),
+            "signal": signal,
         }
+    ).to_csv(input_csv, index=False)
 
-        try:
-            config_path = Path(config_file)
-            if config_path.parent:
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(template_config, f, ensure_ascii=False, indent=4)
-            print(f"[SUCCESS] 配置文件模板已保存: {config_path}")
-        except Exception as e:
-            print(f"[ERROR] 保存配置文件模板失败: {e}")
+    analyzer = CsvReplay(
+        sampling_rate_hz=10.0,
+        target_freq_range_hz=(0.5, 1.0),
+        window_duration_s=6.0,
+        amplitude_threshold=0.7,
+        step_duration_s=3.0,
+        include_plot=True,
+    )
+    analyzer.input_csv_path = str(input_csv)
+    analyzer.time_column = "timestamp"
+    analyzer.value_column = "signal"
+    analyzer.timestamp_format = "%Y-%m-%d %H:%M:%S.%f"
+    analyzer.has_timestamp = True
 
-    def generate_test_signal(self) -> None:
-        try:
-            self.logger.info("开始生成测试信号...")
-
-            # 创建信号生成器
-            generator = SignalGenerator(
-                sampling_rate=int(self.sampling_rate),
-                duration=self._generate_duration,
-                noise_level=self._noise_level,
-                seed=42,  # 固定种子保证可重复性
-                log_file=self.log_file
-            )
-
-            # 生成基础信号（从0开始）
-            signal = np.zeros(len(generator.signal_data))
-
-            # 添加正弦波分量
-            if self._sin_freqs and any(f > 0 for f in self._sin_freqs):
-                sin_signal = generator.sine_wave(
-                    freqs=self._sin_freqs,
-                    amps=self._sin_amps,
-                    phases=self._sin_phases
-                )
-                signal += sin_signal
-                self.logger.info(f"已添加正弦波分量: freqs={self._sin_freqs}")
-
-            # 添加线性分量
-            if self._linear_slope != 0 or self._linear_intercept != 0:
-                linear_signal = generator.linear(
-                    slope=self._linear_slope,
-                    intercept=self._linear_intercept
-                )
-                signal += linear_signal
-                self.logger.info(f"已添加线性分量: slope={self._linear_slope}, intercept={self._linear_intercept}")
-
-            # 添加多项式分量
-            if self._polynomial_parms and any(p != 0 for p in self._polynomial_parms):
-                poly_signal = generator.polynomial(coeffs=self._polynomial_parms)
-                signal += poly_signal
-                self.logger.info(f"已添加多项式分量: coeffs={self._polynomial_parms}")
-
-            # 添加指数分量
-            if self._exponential_amps != 0 and self._exponential_tau != 0:
-                exp_signal = generator.exponential(
-                    A=self._exponential_amps,
-                    tau=self._exponential_tau
-                )
-                signal += exp_signal
-                self.logger.info(f"已添加指数分量: A={self._exponential_amps}, tau={self._exponential_tau}")
-
-            # 保存到CSV文件（使用配置指定的路径）
-            csv_file = self.csv_file
-            try:
-                generator.insert_into_csv(
-                    csv_path=csv_file,
-                    column="值",
-                    start_idx=0,
-                    new_signal=signal,
-                    isCUT=True)
-            except Exception as e:
-                self.logger.error(f"保存信号到CSV文件失败: {e}")
-                raise
-
-            self.logger.info(f"测试信号已生成并保存到: {csv_file}")
-            self.logger.info(f"信号长度: {len(signal)} 点, 持续时间: {self._generate_duration} 秒")
-
-        except Exception as e:
-            self.logger.error(f"生成测试信号失败: {e}")
-            raise
-
-    def run_oscillation_detection(self, csv_file: str, mode: str = "animation") -> Optional[List[Dict]]:
-        """
-        运行振荡检测测试
-
-        Args:
-            csv_file: CSV文件路径
-            mode: 运行模式 ("animation" 或 "static")
-
-        Returns:
-            Optional[List[Dict]]: 静态模式下返回检测结果，动画模式下返回None
-        """
-        try:
-            self.logger.info(f"开始振荡检测测试: {csv_file}")
-            self.logger.info(f"检测参数: window_size={self.window_size}, "
-                             f"sampling_rate={self.sampling_rate}, threshold={self._threshold}")
-
-            # 创建检测器
-            tester = OscillationDetection(
-                csv_file=csv_file,
-                window_size=self.window_size,
-                overlap_ratio=self._overlap_ratio,
-                sampling_rate=self.sampling_rate,
-                threshold=self._threshold,
-                col_name="值",
-                log_file=self.log_file
-            )
-
-            if mode == "animation":
-                self.logger.info("启动动画模式...")
-                tester.run(interval=200)
-                return None
-            elif mode == "static":
-                self.logger.info("启动静态分析模式...")
-                results = tester.analyze_static(start_window=0, num_windows=50)
-                oscillation_count = sum(1 for r in results if r['is_oscillation'])
-                self.logger.info(f"静态分析完成，共分析 {len(results)} 个窗口，"
-                                 f"检测到振荡的窗口数: {oscillation_count}")
-                return results
-            else:
-                raise ValueError(f"不支持的运行模式: {mode}")
-
-        except Exception as e:
-            self.logger.error(f"振荡检测测试失败: {e}")
-            raise
-
-    def run(self, mode: str = "animation"):
-        """
-        运行完整的开发流程
-
-        Args:
-            mode: 运行模式 ("animation" 或 "static")
-        """
-        try:
-            self.logger.info("="*50)
-            self.logger.info("开始振荡检测开发流程")
-            self.logger.info("="*50)
-
-            # 检查文件是否存在
-            csv_file = self.csv_file
-            if not os.path.exists(csv_file) and not self._generate_signal:
-                self.logger.error("指定的CSV文件不存在")
-                raise FileNotFoundError(f"在 {csv_file} 目录中找不到CSV数据文件")
-
-            # 如果配置该选项, 生成测试信号
-            if self._generate_signal:
-                self.logger.info("配置指定生成测试信号")
-                try:
-                    self.generate_test_signal()
-                except Exception as e:
-                    self.logger.error(f"生成测试信号失败: {e}")
-
-            # 运行振荡检测测试
-            results = self.run_oscillation_detection(csv_file, mode=mode)
-
-            if results is not None:
-                # 输出静态分析结果
-                self.logger.info("="*30 + " 检测结果 " + "="*30)
-                for result in results[:10]:  # 显示前10个结果
-                    status = "振荡" if result['is_oscillation'] else "正常"
-                    if result['is_oscillation']:
-                        self.logger.info(f"窗口 {result['window']:3d}: {status} - "
-                                         f"频率={result['peak_frequency']:.2f}Hz, "
-                                         f"幅值={result['peak_amplitude']:.3f}")
-                    else:
-                        self.logger.info(f"窗口 {result['window']:3d}: {status}")
-
-            self.logger.info("="*50)
-            self.logger.info("振荡检测开发流程完成")
-            self.logger.info("="*50)
-
-        except Exception as e:
-            self.logger.error(f"运行流程失败: {e}")
-            raise
-
-
-def main():
-    """主函数"""
-    parser = argparse.ArgumentParser(
-        description="振荡检测开发流程工具",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-使用示例:
-  python main.py                          # 使用默认配置文件
-  python main.py --config my_config.json  # 指定配置文件
-  python main.py --mode static             # 静态分析模式
-  python main.py --mode animation          # 动画演示模式（默认）
-        """
+    results_df = analyzer.analyze_dynamic(pd.read_csv(input_csv))
+    visualizer = ResultVisualizer(
+        results_df=results_df,
+        raw_results=analyzer.last_results,
+        amplitude_threshold=0.7,
     )
 
-    parser.add_argument(
-        '--config', '-c',
-        type=str,
-        default=str(DEFAULT_CONFIG),
-        help='配置文件路径 (默认: src/oscillate_dev_settings.json)'
+    summary_path = tmp_path / "summary.png"
+    spectrum_path = tmp_path / "spectrum.png"
+    visualizer.plot_summary(str(summary_path))
+    visualizer.plot_window_spectrum(0, str(spectrum_path))
+
+    assert summary_path.exists()
+    assert spectrum_path.exists()
+
+
+def test_signal_generator_is_available_from_offline_package():
+    generator = SignalGenerator(
+        sampling_rate=10,
+        duration=1.0,
+        noise_level=0.0,
+        seed=1,
     )
 
-    parser.add_argument(
-        '--mode', '-m',
-        type=str,
-        choices=['animation', 'static'],
-        default='animation',
-        help='运行模式: animation(动画演示) 或 static(静态分析) (默认: animation)'
-    )
+    signal = generator.sine_wave(freqs=[1.0], amps=[1.0])
 
-    parser.add_argument(
-        '--create-config',
-        action='store_true',
-        help='创建配置文件模板并退出'
-    )
-
-    args = parser.parse_args()
-
-    # 如果用户只想创建配置文件模板
-    if args.create_config:
-        ODDevFlow.save_config_template(args.config)
-        return
-
-    try:
-        # 创建并运行开发流程
-        dev_flow = ODDevFlow(config_file=args.config)
-        dev_flow.run(mode=args.mode)
-
-    except KeyboardInterrupt:
-        print("\n[INFO] 用户中断程序")
-    except Exception as e:
-        print(f"[ERROR] 程序执行失败: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
+    assert len(signal) == 10

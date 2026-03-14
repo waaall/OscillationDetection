@@ -1,1 +1,1 @@
-"""Namespace package for source modules."""
+"""Namespace package for oscillation detection modules."""
