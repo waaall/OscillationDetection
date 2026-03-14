@@ -117,7 +117,8 @@ class FFTAnalyzer:
 
     def fft_analyze(self, signal_data: np.ndarray, PLOT_path: str = None,
                     use_window: bool = False, refine_frequency: bool = False,
-                    IpDFT: bool = True, refine_config: Optional[dict] = None
+                    IpDFT: bool = True, refine_config: Optional[dict] = None,
+                    peak_search_range: Optional[Tuple[float, float]] = None
                     ) -> Tuple[bool, Optional[float], Optional[float], Optional[float]]:
         """
         FFT分析函数，支持相量测量（频率、幅值、相位角）
@@ -128,6 +129,7 @@ class FFTAnalyzer:
         :param IpDFT: 是否使用插值DFT（Jacobsen插值法）
         :param refine_frequency: 是否使用最小二乘精化频率
         :param refine_config: 精化配置
+        :param peak_search_range: 峰值搜索频带(Hz)，None表示使用默认有效频带
         :return: (success, frequency, amplitude, phase)
         """
         if len(signal_data) < self._window_size:
@@ -136,43 +138,57 @@ class FFTAnalyzer:
         elif len(signal_data) > self._window_size:
             self.logger.warning("输入数据超过最大窗口大小，进行截断")
 
-        windowed_data = signal_data[-self._window_size:]
-        N = len(windowed_data)
+        raw_window_data = np.asarray(signal_data[-self._window_size:], dtype=float)
+        fft_input_data = raw_window_data.copy()
+        N = len(raw_window_data)
         # 窗函数相关(window_correction是加入窗函数后导致能量损失,用于修正幅值)
         window = None
         window_correction = 1.0
         if use_window:
             window = np.hanning(N)
-            windowed_data = windowed_data * window
+            fft_input_data = fft_input_data * window
             window_correction = np.sum(window) / self._window_size
 
-        fft_vals = np.fft.rfft(windowed_data)
+        fft_vals = np.fft.rfft(fft_input_data)
         freqs = np.fft.rfftfreq(N, d=1.0 / self._sampling_rate)
         fft_amps = FFT_AMP_NORMAL_FACTOR * np.abs(fft_vals) / (N * window_correction)
 
-        valid_idx = np.where((freqs >= self._min_freq) & (freqs <= self._max_freq))
-        valid_freqs = freqs[valid_idx]
-        valid_amps = fft_amps[valid_idx]
-        valid_fft_vals = fft_vals[valid_idx]
+        search_low, search_high = self._freq_range
+        if peak_search_range is not None:
+            search_low = max(float(peak_search_range[0]), self._min_freq)
+            search_high = min(float(peak_search_range[1]), self._max_freq)
+            if search_high <= search_low:
+                self.logger.warning("峰值搜索范围无效: %s", peak_search_range)
+                return False, None, None, None
+
+        search_indices = np.where((freqs >= search_low) & (freqs <= search_high))[0]
+        valid_freqs = freqs[search_indices]
+        valid_amps = fft_amps[search_indices]
 
         if valid_freqs.size == 0:
             self.logger.warning("无有效频率区间，跳过检测")
             return False, None, None, None
 
-        peak_idx = np.argmax(valid_amps)
-        peak_freq = valid_freqs[peak_idx]
-        peak_amp = valid_amps[peak_idx]
-        peak_phase = np.angle(valid_fft_vals[peak_idx])
+        peak_idx = int(search_indices[np.argmax(valid_amps)])
+        peak_freq = freqs[peak_idx]
+        peak_amp = fft_amps[peak_idx]
+        peak_phase = np.angle(fft_vals[peak_idx])
 
         # 插值法和相量修正
-        if IpDFT and 1 <= peak_idx < len(valid_amps) - 1:
+        if IpDFT and 1 <= peak_idx < len(fft_amps) - 1:
             # 取freq peak 和前后共三点, 计算修正系数delta
-            alpha = valid_amps[peak_idx - 1]
-            beta = valid_amps[peak_idx]
-            gamma = valid_amps[peak_idx + 1]
-            delta = 0.5 * (alpha - gamma) / (alpha - 2 * beta + gamma)
-            peak_freq = peak_freq + delta * (valid_freqs[1] - valid_freqs[0])
-            peak_amp = beta - 0.25 * (alpha - gamma) * delta
+            alpha = fft_amps[peak_idx - 1]
+            beta = fft_amps[peak_idx]
+            gamma = fft_amps[peak_idx + 1]
+            denom = alpha - 2 * beta + gamma
+            if abs(denom) > 1e-12 and len(freqs) > 1:
+                delta = 0.5 * (alpha - gamma) / denom
+                peak_freq = peak_freq + delta * (freqs[1] - freqs[0])
+                peak_amp = beta - 0.25 * (alpha - gamma) * delta
+
+        peak_freq_base = peak_freq
+        peak_amp_base = peak_amp
+        peak_phase_base = peak_phase
 
         # 频率精细化（最小二乘）
         if refine_frequency and peak_freq is not None:
@@ -185,7 +201,7 @@ class FFTAnalyzer:
                 )
 
                 refined = refiner.refine(
-                    windowed_data,
+                    raw_window_data,
                     self._sampling_rate,
                     peak_freq,
                     return_all_params=True
@@ -193,13 +209,24 @@ class FFTAnalyzer:
 
                 if refined is not None:
                     freq_refined, amp_refined, phase_refined, dc_refined, residual = refined
-                    self.logger.info(
-                        f"频率精化: {peak_freq:.6f}Hz → {freq_refined:.6f}Hz "
-                        f"(残差={residual:.6f})"
-                    )
-                    peak_freq = freq_refined
-                    peak_amp = amp_refined
-                    peak_phase = phase_refined
+                    if peak_search_range is not None and not (search_low <= freq_refined <= search_high):
+                        self.logger.warning(
+                            "频率精化结果 %.6fHz 超出搜索范围 [%.6f, %.6f]Hz，保持IpDFT结果",
+                            freq_refined,
+                            search_low,
+                            search_high
+                        )
+                        peak_freq = peak_freq_base
+                        peak_amp = peak_amp_base
+                        peak_phase = peak_phase_base
+                    else:
+                        self.logger.info(
+                            f"频率精化: {peak_freq:.6f}Hz → {freq_refined:.6f}Hz "
+                            f"(残差={residual:.6f})"
+                        )
+                        peak_freq = freq_refined
+                        peak_amp = amp_refined
+                        peak_phase = phase_refined
                 else:
                     self.logger.warning("频率精化失败，保持IpDFT结果")
             except Exception as e:
@@ -213,7 +240,7 @@ class FFTAnalyzer:
                     self.logger.warning(f"绘图目录不存在, 将创建: {dir_path}")
                     os.makedirs(dir_path, exist_ok=True)
 
-                self.__plot_comparison(windowed_data, valid_freqs, valid_amps,
+                self.__plot_comparison(raw_window_data, valid_freqs, valid_amps,
                                        PLOT_path, peak_freq, peak_amp, peak_phase)
             except Exception as e:
                 self.logger.error(f"绘图失败: {e}")

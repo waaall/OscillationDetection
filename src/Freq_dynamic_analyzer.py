@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Tuple, Optional, Callable
 from datetime import datetime, timedelta
+import numpy as np
 import pandas as pd
 
 # 添加项目根目录到Python路径（支持直接运行本文件）
@@ -155,7 +156,8 @@ class FreqDynamicAnalyzer:
         # 保存配置
         self.window_duration_ms = window_duration_ms
         self.step_duration_ms = step_duration_ms
-        self.sampling_rate = sampling_rate
+        self.sampling_rate = float(sampling_rate)
+        self.effective_sampling_rate = float(sampling_rate)
         self.freq_range = freq_range
         self.use_window = use_window
         self.use_ipdft = use_ipdft
@@ -163,10 +165,12 @@ class FreqDynamicAnalyzer:
         self.zero_cross_config = zero_cross_config or {}
         self.refine_frequency = refine_frequency
         self.refine_config = refine_config or {}
+        self._zero_cross_ignored_logged = False
+        self._last_sampling_info = None
 
         # 计算窗口大小和步长（数据点数）
-        self.window_samples = int(sampling_rate * window_duration_ms / 1000)
-        self.step_samples = int(sampling_rate * step_duration_ms / 1000)
+        self.window_samples = self._compute_sample_count(self.sampling_rate, window_duration_ms)
+        self.step_samples = self._compute_sample_count(self.sampling_rate, step_duration_ms)
 
         # 设置日志
         self._setup_logger(log_file)
@@ -175,7 +179,7 @@ class FreqDynamicAnalyzer:
         self.logger.info(f"FFTDynamicAnalyzer 初始化完成: "
                          f"窗口={window_duration_ms}ms ({self.window_samples}点), "
                          f"步长={step_duration_ms}ms ({self.step_samples}点), "
-                         f"采样率={sampling_rate}Hz, "
+                         f"采样率={self.sampling_rate}Hz, "
                          f"频率范围={freq_range}Hz, "
                          f"模式={method}, "
                          f"精化={'开启' if self.refine_frequency else '关闭'}")
@@ -243,29 +247,66 @@ class FreqDynamicAnalyzer:
         date_str = dt.strftime("%Y/%m/%d %H:%M:%S")
         return f"{date_str}::{milliseconds:03d}"
 
-    def _validate_sampling_rate(self, df: pd.DataFrame) -> float:
+    @staticmethod
+    def _compute_sample_count(sampling_rate: float, duration_ms: float) -> int:
+        """根据采样率与时长计算窗口点数，至少返回1。"""
+        return max(int(round(float(sampling_rate) * float(duration_ms) / 1000.0)), 1)
+
+    def _validate_sampling_rate(self, df: pd.DataFrame) -> dict:
         """
-        验证实际采样率与配置是否一致
+        验证实际采样率与配置是否一致，并给出生效采样率
 
         :param df: 输入DataFrame
-        :return: 实际平均采样率
+        :return: 采样率信息字典
         """
+        info = {
+            'configured_sampling_rate': float(self.sampling_rate),
+            'actual_sampling_rate': None,
+            'effective_sampling_rate': float(self.sampling_rate),
+            'window_samples': self._compute_sample_count(self.sampling_rate, self.window_duration_ms),
+            'step_samples': self._compute_sample_count(self.sampling_rate, self.step_duration_ms),
+            'mean_interval': None,
+            'std_interval': None,
+            'used_actual_sampling_rate': False,
+        }
+
+        if 'timestamp' not in df.columns:
+            self.logger.warning("缺少 timestamp 列，使用配置采样率 %.3fHz", self.sampling_rate)
+            return info
+
         if len(df) < 2:
             self.logger.warning("数据点太少，无法验证采样率")
-            return self.sampling_rate
+            return info
+
+        timestamps = pd.to_datetime(df['timestamp'], errors='coerce')
+        if timestamps.isnull().any():
+            self.logger.warning("时间戳存在无法解析的值，使用配置采样率 %.3fHz", self.sampling_rate)
+            return info
+
+        if not timestamps.is_monotonic_increasing:
+            self.logger.warning("时间戳不是递增顺序，使用配置采样率 %.3fHz", self.sampling_rate)
+            return info
 
         # 计算时间间隔
-        time_diffs = df['timestamp'].diff().dropna()
-        time_diffs_seconds = time_diffs.dt.total_seconds()
+        time_diffs_seconds = timestamps.diff().dropna().dt.total_seconds()
+        if (time_diffs_seconds <= 0).any():
+            self.logger.warning("时间戳间隔存在非正值，使用配置采样率 %.3fHz", self.sampling_rate)
+            return info
 
         # 统计信息
         mean_interval = time_diffs_seconds.mean()
         std_interval = time_diffs_seconds.std()
+        if pd.isna(std_interval):
+            std_interval = 0.0
         actual_sampling_rate = 1.0 / mean_interval
+        info['actual_sampling_rate'] = float(actual_sampling_rate)
+        info['mean_interval'] = float(mean_interval)
+        info['std_interval'] = float(std_interval)
 
         # 验证采样率一致性
         expected_interval = 1.0 / self.sampling_rate
         relative_error = abs(mean_interval - expected_interval) / expected_interval
+        jitter_ratio = std_interval / mean_interval if mean_interval > 0 else np.inf
 
         if relative_error > 0.05:  # 5%误差阈值
             self.logger.warning(
@@ -274,15 +315,46 @@ class FreqDynamicAnalyzer:
             )
 
         # 检测采样不均匀性
-        if std_interval / mean_interval > 0.1:  # 10%变异系数阈值
+        if jitter_ratio > 0.1:  # 10%变异系数阈值
             self.logger.warning(
                 f"采样不均匀！时间间隔标准差={std_interval*1000:.3f}ms"
             )
+        else:
+            info['effective_sampling_rate'] = float(actual_sampling_rate)
+            info['window_samples'] = self._compute_sample_count(
+                actual_sampling_rate, self.window_duration_ms
+            )
+            info['step_samples'] = self._compute_sample_count(
+                actual_sampling_rate, self.step_duration_ms
+            )
+            info['used_actual_sampling_rate'] = True
 
         self.logger.info(f"采样率验证: 实际={actual_sampling_rate:.2f}Hz, "
-                         f"间隔均值={mean_interval*1000:.3f}ms")
+                         f"间隔均值={mean_interval*1000:.3f}ms, "
+                         f"生效采样率={info['effective_sampling_rate']:.2f}Hz")
 
-        return actual_sampling_rate
+        return info
+
+    def _log_zero_cross_ignored_options(self):
+        """在过零模式下提示被忽略的 FFT 专用配置。"""
+        if self._zero_cross_ignored_logged:
+            return
+
+        ignored = []
+        if self.use_window:
+            ignored.append("use_window")
+        if self.use_ipdft:
+            ignored.append("use_ipdft")
+        if self.refine_frequency:
+            ignored.append("refine_frequency")
+
+        if ignored:
+            self.logger.warning(
+                "ZeroCrossFreq 模式忽略 FFT 专用选项: %s",
+                ", ".join(ignored)
+            )
+
+        self._zero_cross_ignored_logged = True
 
     def load_csv(self,
                  csv_path: str,
@@ -344,7 +416,9 @@ class FreqDynamicAnalyzer:
             result_df = result_df.sort_values('timestamp').reset_index(drop=True)
 
         # 验证采样率
-        self._validate_sampling_rate(result_df)
+        sampling_info = self._validate_sampling_rate(result_df)
+        self._last_sampling_info = sampling_info
+        result_df.attrs['sampling_info'] = sampling_info
 
         self.logger.info(f"CSV加载完成: {len(result_df)} 个数据点")
 
@@ -361,10 +435,33 @@ class FreqDynamicAnalyzer:
         :param use_zero_crossing: 是否使用过零检测替代FFT（覆盖实例默认值，最高优先级）
         :return: 结果DataFrame (columns: ['timestamp', 'frequency', 'amplitude', 'phase'])
         """
+        if 'timestamp' in df.columns and not df['timestamp'].is_monotonic_increasing:
+            self.logger.warning("analyze_dynamic 收到的时间戳不是递增顺序，自动排序")
+            df = df.sort_values('timestamp').reset_index(drop=True)
+
+        sampling_info = self._validate_sampling_rate(df)
+        self._last_sampling_info = sampling_info
+        self.effective_sampling_rate = sampling_info['effective_sampling_rate']
+        window_samples = sampling_info['window_samples']
+        step_samples = sampling_info['step_samples']
+        self.window_samples = window_samples
+        self.step_samples = step_samples
+
+        self.logger.info(
+            "分析参数: 配置采样率=%.2fHz, 实测采样率=%s, 生效采样率=%.2fHz, "
+            "窗口=%d点, 步长=%d点",
+            self.sampling_rate,
+            "N/A" if sampling_info['actual_sampling_rate'] is None
+            else f"{sampling_info['actual_sampling_rate']:.2f}Hz",
+            self.effective_sampling_rate,
+            window_samples,
+            step_samples
+        )
+
         # 检查数据长度
-        if len(df) < self.window_samples:
+        if len(df) < window_samples:
             self.logger.error(
-                f"数据长度不足！需要至少 {self.window_samples} 个点，"
+                f"数据长度不足！需要至少 {window_samples} 个点，"
                 f"实际只有 {len(df)} 个点"
             )
             return pd.DataFrame(columns=['timestamp', 'frequency', 'amplitude', 'phase'])
@@ -372,33 +469,34 @@ class FreqDynamicAnalyzer:
         # 选择频率估计器（优先级：运行时参数 > 实例配置）
         zero_cross_flag = self.use_zero_crossing if use_zero_crossing is None else bool(use_zero_crossing)
         if zero_cross_flag:
+            self._log_zero_cross_ignored_options()
             analyzer = ZeroCrossFreq(
-                window_size=self.window_samples,
-                sampling_rate=self.sampling_rate,
+                window_size=window_samples,
+                sampling_rate=self.effective_sampling_rate,
                 config=self.zero_cross_config,
                 logger=self.logger
             )
             mode_label = "ZeroCrossFreq"
         else:
             analyzer = FFTAnalyzer(
-                window_size=self.window_samples,
-                sampling_rate=self.sampling_rate,
+                window_size=window_samples,
+                sampling_rate=self.effective_sampling_rate,
                 log_file=None  # 不重复记录日志
             )
             mode_label = "FFT"
 
         # 计算窗口数量
-        total_windows = (len(df) - self.window_samples) // self.step_samples + 1
+        total_windows = (len(df) - window_samples) // step_samples + 1
         self.logger.info(f"开始动态{mode_label}分析: {total_windows} 个窗口")
 
         # 滑动窗口遍历
         results = []
         window_count = 0
 
-        for i in range(0, len(df) - self.window_samples + 1, self.step_samples):
+        for i in range(0, len(df) - window_samples + 1, step_samples):
             # 提取窗口数据
-            window_data = df['signal'].iloc[i:i+self.window_samples].values
-            window_end_time = df['timestamp'].iloc[i + self.window_samples - 1]
+            window_data = df['signal'].iloc[i:i+window_samples].values
+            window_end_time = df['timestamp'].iloc[i + window_samples - 1]
 
             # FFT分析
             success, freq, amp, phase = analyzer.fft_analyze(
@@ -406,7 +504,8 @@ class FreqDynamicAnalyzer:
                 use_window=self.use_window,
                 IpDFT=self.use_ipdft,
                 refine_frequency=self.refine_frequency,
-                refine_config=self.refine_config if self.refine_frequency else None
+                refine_config=self.refine_config if self.refine_frequency else None,
+                peak_search_range=self.freq_range if not zero_cross_flag else None
             )
 
             # 结果过滤（频率范围）
@@ -425,7 +524,7 @@ class FreqDynamicAnalyzer:
 
             # 进度回调
             if progress_callback:
-                progress_callback(i // self.step_samples + 1, total_windows)
+                progress_callback(i // step_samples + 1, total_windows)
 
         self.logger.info(f"{mode_label}分析完成: 共 {window_count} 个有效窗口")
 

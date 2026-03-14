@@ -6,6 +6,7 @@ import time
 import sys
 import re
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import pandas as pd
@@ -145,7 +146,8 @@ def test_convergence_with_poor_initial():
     assert abs(freq_est - true_freq) < 2e-3
 
 
-def _run_dynamic_pipeline(output_name: str, refine_frequency: bool) -> pd.DataFrame:
+def _run_dynamic_pipeline(output_name: str, refine_frequency: bool,
+                          output_dir: Path = None) -> pd.DataFrame:
     """封装动态 FFT 全流程，便于对比有/无精化。"""
     input_csv = PROJECT_ROOT / "csv-data/clean_200ms_liner_20251210.csv"
     assert input_csv.exists(), "输入 CSV 不存在"
@@ -171,7 +173,9 @@ def _run_dynamic_pipeline(output_name: str, refine_frequency: bool) -> pd.DataFr
     )
     analyzer.logger.setLevel(logging.WARNING)
 
-    output_path = PROJECT_ROOT / "csv-data" / output_name
+    output_root = Path(output_dir) if output_dir is not None else PROJECT_ROOT / "csv-data"
+    output_root.mkdir(parents=True, exist_ok=True)
+    output_path = output_root / output_name
     results_df = analyzer.run_pipeline(
         input_csv=str(input_csv),
         output_csv=str(output_path),
@@ -187,25 +191,48 @@ def _run_dynamic_pipeline(output_name: str, refine_frequency: bool) -> pd.DataFr
 def test_clean_csv_frequency_refinement_pipeline():
     """使用 FFTDynamicAnalyzer + 频率精化的完整流程。"""
     output_name = "clean_200ms_liner_frequency_refined.csv"
-    results_df = _run_dynamic_pipeline(output_name, refine_frequency=True)
+    with TemporaryDirectory() as temp_dir:
+        output_dir = Path(temp_dir)
+        results_df = _run_dynamic_pipeline(output_name, refine_frequency=True, output_dir=output_dir)
 
-    assert len(results_df) > 0
-    df_out = pd.read_csv(PROJECT_ROOT / "csv-data" / output_name)
-    assert not df_out.empty
-    ts_sample = str(df_out.iloc[0]["RX Date/Time"])
-    assert re.match(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}::\d{3}", ts_sample)
+        assert len(results_df) > 0
+        df_out = pd.read_csv(output_dir / output_name)
+        assert not df_out.empty
+        ts_sample = str(df_out.iloc[0]["RX Date/Time"])
+        assert re.match(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}::\d{3}", ts_sample)
 
 
 def test_clean_csv_frequency_no_refine_pipeline():
     """使用 FFTDynamicAnalyzer 仅 IpDFT（无精化）的完整流程。"""
     output_name = "clean_200ms_liner_frequency_ipdft.csv"
-    results_df = _run_dynamic_pipeline(output_name, refine_frequency=False)
+    with TemporaryDirectory() as temp_dir:
+        output_dir = Path(temp_dir)
+        results_df = _run_dynamic_pipeline(output_name, refine_frequency=False, output_dir=output_dir)
 
-    assert len(results_df) > 0
-    df_out = pd.read_csv(PROJECT_ROOT / "csv-data" / output_name)
-    assert not df_out.empty
-    ts_sample = str(df_out.iloc[0]["RX Date/Time"])
-    assert re.match(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}::\d{3}", ts_sample)
+        assert len(results_df) > 0
+        df_out = pd.read_csv(output_dir / output_name)
+        assert not df_out.empty
+        ts_sample = str(df_out.iloc[0]["RX Date/Time"])
+        assert re.match(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}::\d{3}", ts_sample)
+
+
+def test_clean_csv_frequency_refinement_keeps_row_count_close():
+    """真实 CSV 上，精化模式不应显著减少有效窗口数。"""
+    with TemporaryDirectory() as temp_dir:
+        output_dir = Path(temp_dir)
+        results_no_refine = _run_dynamic_pipeline(
+            "clean_200ms_liner_frequency_ipdft.csv",
+            refine_frequency=False,
+            output_dir=output_dir,
+        )
+        results_refined = _run_dynamic_pipeline(
+            "clean_200ms_liner_frequency_refined.csv",
+            refine_frequency=True,
+            output_dir=output_dir,
+        )
+
+    assert len(results_no_refine) > 0
+    assert len(results_refined) >= len(results_no_refine) * 0.98
 
 
 if __name__ == "__main__":

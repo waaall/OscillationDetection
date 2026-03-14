@@ -20,7 +20,9 @@
 │       └── Zero_Cross_Freq.py          # 过零检测工具
 ├── tests/
 │   ├── test_dynamic_fft.py             # 动态频率示例/烟囱测试
+│   ├── test_fft_regression.py          # FFT回归测试
 │   ├── test_frequency_refinement.py    # 频率精细化单元测试
+│   ├── test_zero_cross_regression.py   # 过零检测回归测试
 │   └── test_oscillation_detection.py   # 振荡检测开发流程
 ├── csv-data/                           # 输入/输出CSV样例
 ├── plots/                              # 绘图输出目录
@@ -40,6 +42,7 @@
 - 高精度频率检测（默认10kHz采样率）
 - 支持电网谐波分析（50Hz基频+5次谐波）
 - 窗函数处理和插值优化
+- 支持窄带锁定目标基波，同时保留 IpDFT 所需相邻 bin
 - 可视化频域图表
 
 **使用示例**:
@@ -54,7 +57,11 @@ analyzer = FFTAnalyzer(window_size=800, sampling_rate=10000)
 signal = analyzer.generate_test_signal(fundamental_freq=50.02)
 
 # FFT分析
-detected, freq, amp, phase = analyzer.fft_analyze(signal, PLOT_path="result.png")
+detected, freq, amp, phase = analyzer.fft_analyze(
+    signal,
+    PLOT_path="result.png",
+    peak_search_range=(49.9, 50.1),  # 可选：只在目标频带内选峰
+)
 ```
 
 #### 1.1 频率精细化（最小二乘拟合）
@@ -82,6 +89,8 @@ success, freq, amp, phase = analyzer.fft_analyze(
 
 - **自适应搜索范围**：默认 `range = max(5*Δf, 0.05)`；若初值在 49–51Hz，软限制为 `min(range, 0.5)`。精化失败时自动扩大一档后重试。
 - **模型**：给定频率下，线性最小二乘解 `y = a*sin(ωt) + b*cos(ωt) + dc`，再做一维频率搜索（Brent/网格+二次插值）。
+- **输入链路**：FFT 检测可加窗；最小二乘精化始终使用原始未加窗窗口，避免窗函数污染频率精化。
+- **回退策略**：精化失败、异常或跑出目标频带时，自动回退到 IpDFT 结果，而不是粗 FFT bin。
 - **适用场景**：单频 + DC，SNR≥30dB，数据长度≥0.16s（推荐 ≥0.5s）。实时循环默认关闭，仅按需开启。
 
 #### 1.2 过零检测（Zero-Crossing）
@@ -93,6 +102,7 @@ success, freq, amp, phase = analyzer.fft_analyze(
 - 适用场景：SNR ≥ 40dB，单频或准单频信号（如电网50Hz）
 - 计算速度优势：对于长窗口，ZC比FFT+精化快约2-5倍
 - 支持DC去除、仅上升沿检测等配置选项
+- `rising_only=False` 时按同向过零点的整周期计算频率，不会把结果翻倍
 
 **使用示例**:
 
@@ -134,6 +144,10 @@ results = analyzer.analyze_dynamic(df, use_zero_crossing=True)
 | 频率精度 | 高（取决于采样率） | 高（取决于窗口大小+精化） |
 | 谐波抑制 | 差 | 好（可分离谐波） |
 
+**说明**:
+- ZC 模式下 `use_window`、`use_ipdft`、`refine_frequency` 属于 FFT 专用参数，运行时会被忽略并打印提示日志。
+- ZC 返回的 `phase` 是兼容性近似值，适合回归和接口兼容，不承诺与 FFT 相位严格等价。
+
 ### 2. 振荡检测测试框架 (`tests/test_oscillation_detection.py`)
 
 **用途**: 连续监测和振荡检测，适用于实时系统监控
@@ -167,7 +181,8 @@ python tests/test_oscillation_detection.py --mode static --config src/oscillate_
 - 支持datetime时间戳输入输出
 - 滑动窗口连续分析（默认200ms窗口，100ms步长）
 - 可配置采样率、窗口大小、频率范围
-- 自动验证采样率和处理边界情况
+- 自动验证采样率，并在时间戳可信时采用实测采样率重算窗口点数
+- `frequency_range` 用于锁定目标基波搜索带和输出过滤带，但不会裁掉 IpDFT 所需邻近 bin
 - 完整的JSON配置文件支持
 
 **输入CSV格式**:
@@ -205,14 +220,14 @@ RX Date/Time,组/A_Freq
 
 - `window_duration_ms`: 200ms (分析窗口大小)
 - `step_duration_ms`: 100ms (滑动步长)
-- `sampling_rate`: 10000Hz (可配置采样率)
-- `frequency_range`: [49.9, 50.1]Hz (关注频率范围)
+- `sampling_rate`: 10000Hz (配置采样率；时间戳可信时会自动切换为实测采样率)
+- `frequency_range`: [49.9, 50.1]Hz (目标基波搜索/输出频带)
 - `use_window`: true (使用Hanning窗)
 - `use_ipdft`: true (使用插值DFT提高精度)
 - `use_zero_crossing`: false (频率估计算法：false=FFT, true=过零检测)
 - `zero_cross_config`: {...} (过零检测参数，仅当use_zero_crossing=true时生效)
 
-配置文件示例 (`src/core/config_fft_dynamic.json`):
+配置文件示例 (`src/config_fft_dynamic.json`):
 ```json
 {
   "analysis": {
@@ -232,7 +247,9 @@ RX Date/Time,组/A_Freq
 }
 ```
 
-**注**: 将 `use_zero_crossing` 设为 `true` 可启用过零检测算法替代FFT
+**注**:
+- 将 `use_zero_crossing` 设为 `true` 可启用过零检测算法替代FFT
+- 若 CSV 时间戳稳定且与配置采样率不一致，系统会优先采用实测采样率
 
 ## 应用场景对比
 
@@ -252,6 +269,8 @@ RX Date/Time,组/A_Freq
 pip install numpy pandas matplotlib logging
 ```
 
+若希望 `FrequencyRefinement` 使用 `minimize_scalar`，还需额外安装 `scipy`；未安装时会自动回退到 `grid_search`。
+
 ## 通信模块 (待集成)
 
 ```bash
@@ -266,10 +285,11 @@ pip install pymodbus pymysql
 
 ## 快速开始
 
-1. **FFT分析**: 运行 `python -m src.FFT_analyzer`
+1. **FFT分析**: 运行 `python -m src.core.FFT_analyzer`
 2. **动态频率分析** **[新增]**: 运行 `python tests/test_dynamic_fft.py` 查看完整示例，或 `python -m src.Freq_dynamic_analyzer` 用配置跑管线
 3. **振荡检测**: 运行 `python tests/test_oscillation_detection.py --create-config --config src/oscillate_dev_settings.json` 后编辑配置文件
 4. **信号生成**: 使用 `from src.core.SignalGenerator import SignalGenerator` 创建测试信号（现已支持datetime时间戳）
+5. **回归测试**: 运行 `python -m pytest tests/test_fft_regression.py tests/test_zero_cross_regression.py tests/test_frequency_refinement.py -q`
 
 ## 输出示例
 
@@ -285,15 +305,15 @@ pip install pymodbus pymysql
 **新增功能**:
 - ✅ `src/Freq_dynamic_analyzer.py`: 动态频率分析器，支持滑动窗口连续分析
 - ✅ `src/core/SignalGenerator.py`: 添加datetime时间戳支持（完全向后兼容）
-- ✅ `src/core/config_fft_dynamic.json`: 模块化JSON配置系统
+- ✅ `src/config_fft_dynamic.json`: 模块化JSON配置系统
 - ✅ `tests/test_dynamic_fft.py`: 完整使用示例脚本
 - ✅ 核心模块集中到 `src/core/`，测试迁移到 `tests/`
 
 **核心特性**:
 - datetime时间戳输入输出（微秒输入 → 毫秒输出）
 - 可配置窗口大小和滑动步长（默认200ms/100ms）
-- 自动采样率验证和边界情况处理
+- 自动采样率验证，并在时间戳可信时采用实测采样率
 - 支持多种时间戳格式自动识别
-- 频率范围过滤（适用于50Hz电网信号）
+- 目标基波频带锁定（适用于50Hz电网信号）
 
 **向后兼容性**: 所有原有功能保持不变，现有代码无需修改即可运行

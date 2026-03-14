@@ -141,20 +141,22 @@ class ZeroCrossFreq:
             logger.addHandler(file_handler)
         return logger
 
-    def _detect_zero_crossings(self, signal: np.ndarray) -> np.ndarray:
-        """Return fractional sample indices where the signal crosses zero."""
+    def _detect_zero_crossings(self, signal: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Return fractional crossing indices and edge directions."""
         crossings = []
+        edges = []
         prev = signal[0]
 
         for idx in range(1, len(signal)):
             curr = signal[idx]
+            edge = 0
 
-            if self.config.rising_only:
-                condition = prev <= 0.0 < curr
-            else:
-                condition = (prev <= 0.0 < curr) or (prev >= 0.0 > curr)
+            if prev <= 0.0 < curr:
+                edge = 1
+            elif prev >= 0.0 > curr:
+                edge = -1
 
-            if not condition:
+            if edge == 0:
                 prev = curr
                 continue
 
@@ -165,9 +167,10 @@ class ZeroCrossFreq:
                 frac = (-prev) / denom
 
             crossings.append(idx - 1 + frac)
+            edges.append(edge)
             prev = curr
 
-        return np.array(crossings, dtype=float)
+        return np.array(crossings, dtype=float), np.array(edges, dtype=int)
 
     def _filter_periods(self, period_samples: np.ndarray) -> np.ndarray:
         """Apply glitch and range filtering to raw period samples."""
@@ -196,16 +199,20 @@ class ZeroCrossFreq:
 
         return np.array(valid_periods, dtype=float)
 
-    def _estimate_phase(self, first_cross_idx: float) -> float:
+    def _estimate_phase(self, first_cross_idx: float, edge: int, freq_hz: float) -> float:
         """
         Rough phase estimation (radians) relative to the window start.
 
         The calculation assumes a near-sinusoidal waveform; it is mainly kept for
         API compatibility with the FFT analyzer.
         """
-        if self.window_size <= 0:
+        if self.window_size <= 0 or self.sampling_rate <= 0 or freq_hz <= 0:
             return 0.0
-        return -2.0 * np.pi * (first_cross_idx / self.window_size)
+
+        cross_time = first_cross_idx / self.sampling_rate
+        base_phase = 0.0 if edge >= 0 else np.pi
+        phase = base_phase - 2.0 * np.pi * freq_hz * cross_time
+        return float((phase + np.pi) % (2.0 * np.pi) - np.pi)
 
     def fft_analyze(  # noqa: N802 - keep name for compatibility
         self,
@@ -215,6 +222,7 @@ class ZeroCrossFreq:
         IpDFT: bool = False,
         refine_frequency: bool = False,
         refine_config: Optional[dict] = None,
+        peak_search_range: Optional[Tuple[float, float]] = None,
     ) -> Tuple[bool, float, float, float]:
         """
         Estimate frequency for a single window of samples.
@@ -247,13 +255,34 @@ class ZeroCrossFreq:
             signal = signal - np.mean(signal)
 
         # Detect zero crossings with linear interpolation.
-        crossings = self._detect_zero_crossings(signal)
+        crossings, edges = self._detect_zero_crossings(signal)
         if crossings.size < 2:
             self.logger.debug("未检测到足够的过零点（%d）", crossings.size)
             self.error_count += 1
             return False, 0.0, amplitude, 0.0
 
-        periods = np.diff(crossings)
+        if self.config.rising_only:
+            edge_mask = edges > 0
+            edge_crossings = crossings[edge_mask]
+            if edge_crossings.size < 2:
+                self.logger.debug("上升沿过零点不足（%d）", edge_crossings.size)
+                self.error_count += 1
+                return False, 0.0, amplitude, 0.0
+            periods = np.diff(edge_crossings)
+        else:
+            period_sets = []
+            rising_crossings = crossings[edges > 0]
+            falling_crossings = crossings[edges < 0]
+            if rising_crossings.size >= 2:
+                period_sets.append(np.diff(rising_crossings))
+            if falling_crossings.size >= 2:
+                period_sets.append(np.diff(falling_crossings))
+            if not period_sets:
+                self.logger.debug("同向过零点不足，无法组成整周期")
+                self.error_count += 1
+                return False, 0.0, amplitude, 0.0
+            periods = np.concatenate(period_sets)
+
         filtered_periods = self._filter_periods(periods)
         if filtered_periods.size == 0:
             self.logger.debug("全部周期被过滤，可能为毛刺或超出频率范围")
@@ -265,5 +294,5 @@ class ZeroCrossFreq:
         freq_hz = self.sampling_rate / period_avg_samples
 
         self.valid_count += 1
-        phase = self._estimate_phase(crossings[0])
+        phase = self._estimate_phase(crossings[0], int(edges[0]), freq_hz)
         return True, float(freq_hz), float(amplitude), float(phase)
