@@ -11,6 +11,7 @@ from src.core.fft_analyzer import FFTAnalysisResult, FFTAnalyzer
 
 @dataclass(frozen=True)
 class PreparedSignal:
+    """经过清洗、排序、可选重采样后的信号，可直接送入FFTAnalyzer类"""
     values: np.ndarray
     timestamps: Optional[pd.Series]
     sampling_rate_hz: float
@@ -49,6 +50,7 @@ class DetectionPipeline:
             raise ValueError("target_freq_range_hz must satisfy 0 < low < high")
         if self.window_duration_s <= 0:
             raise ValueError("window_duration_s must be positive")
+        # 窗口时长必须 >= 目标最低频率的 3 个周期，否则频率分辨率不足
         min_window_duration_s = 3.0 / low_hz
         if self.window_duration_s < min_window_duration_s:
             raise ValueError(
@@ -72,6 +74,7 @@ class DetectionPipeline:
         source_mode: str = "samples",
         timestamp_format: Optional[str] = None,
     ) -> list[dict[str, Any]]:
+        # 信号预处理：清洗、时间戳解析、采样率推断/校验、可选重采样
         try:
             prepared = self._prepare_signal(
                 values,
@@ -80,6 +83,7 @@ class DetectionPipeline:
                 timestamp_format=timestamp_format,
             )
         except ValueError as exc:
+            # 预处理失败直接返回一条 invalid_input 结果，不进入窗口分析
             return [
                 self._invalid_result(
                     reason=str(exc),
@@ -88,10 +92,12 @@ class DetectionPipeline:
                 )
             ]
 
+        # 将窗口时长换算为样本数
         window_samples = max(
             int(round(self.window_duration_s * prepared.sampling_rate_hz)),
             1,
         )
+        # 数据总长度不足一个完整窗口时，输出 insufficient_data 而非空结果
         if prepared.values.size < window_samples:
             return [
                 self._result_from_metrics(
@@ -112,6 +118,7 @@ class DetectionPipeline:
                 )
             ]
 
+        # step_duration_s 为滑窗步进；None 时退化为不重叠的逐窗分析
         if step_duration_s is None:
             step_samples = window_samples
         else:
@@ -126,13 +133,14 @@ class DetectionPipeline:
             include_spectrum=self.include_spectrum,
         )
 
+        # 滑窗遍历：逐窗口 FFT → 状态分类 → 组装结果
         results: list[dict[str, Any]] = []
         for window_id, start_index in enumerate(
             range(0, prepared.values.size - window_samples + 1, step_samples)
         ):
             end_index = start_index + window_samples - 1
             metrics = analyzer.analyze(
-                prepared.values[start_index : start_index + window_samples]
+                prepared.values[start_index: start_index + window_samples]
             )
             status, reason = self._classify_window(metrics)
             debug = None
@@ -169,6 +177,7 @@ class DetectionPipeline:
         timestamps: Optional[Sequence[Any]],
         timestamp_format: Optional[str],
     ) -> PreparedSignal:
+        # 数值清洗：强制转数值 → 前向/后向填充缺失值
         raw_values = pd.Series(values, dtype="object")
         numeric_values = pd.to_numeric(raw_values, errors="coerce")
         if numeric_values.isna().all():
@@ -195,9 +204,11 @@ class DetectionPipeline:
                     "value": clean_values.astype(float),
                 }
             )
+            # 乱序时间戳先排序
             if not records["timestamp"].is_monotonic_increasing:
                 records = records.sort_values("timestamp").reset_index(drop=True)
 
+            # 重复时间戳：允许重采样时取均值合并，否则报错
             if records["timestamp"].duplicated().any():
                 if not self.allow_resample:
                     raise ValueError("resample_failed")
@@ -208,6 +219,7 @@ class DetectionPipeline:
                     .reset_index(drop=True)
                 )
 
+            # 根据时间戳间隔推断采样率，并与外部传入值做一致性校验
             inferred_rate, relative_error, irregular = self._infer_sampling_context(
                 records["timestamp"],
                 expected_rate_hz=resolved_rate,
@@ -220,6 +232,7 @@ class DetectionPipeline:
 
             self._validate_band_against_rate(resolved_rate)
 
+            # 均值误差 >5% 或变异系数 >10% 视为采样不均匀，需要重采样
             needs_resample = (
                 relative_error is not None and relative_error > 0.05
             ) or irregular
@@ -258,11 +271,13 @@ class DetectionPipeline:
         std_interval_s = float(intervals_s.std(ddof=0))
         inferred_rate = 1.0 / mean_interval_s
 
+        # 与外部指定的采样率做相对误差比较
         relative_error: Optional[float] = None
         if expected_rate_hz is not None:
             expected_interval_s = 1.0 / expected_rate_hz
             relative_error = abs(mean_interval_s - expected_interval_s) / expected_interval_s
 
+        # 变异系数 >10% 判定为不规则采样
         irregular = bool(std_interval_s / mean_interval_s > 0.1)
         return inferred_rate, relative_error, irregular
 
@@ -279,6 +294,7 @@ class DetectionPipeline:
         if np.any(np.diff(seconds) <= 0):
             raise ValueError("resample_failed")
 
+        # 按目标采样率生成等间隔时间轴，线性插值重采样
         step_s = 1.0 / target_rate_hz
         new_seconds = np.arange(0.0, seconds[-1] + (step_s * 0.5), step_s)
         new_values = np.interp(new_seconds, seconds, records["value"].to_numpy(dtype=float))
@@ -287,10 +303,13 @@ class DetectionPipeline:
         return pd.DataFrame({"timestamp": new_timestamps, "value": new_values})
 
     def _classify_window(self, metrics: FFTAnalysisResult) -> tuple[str, str]:
+        """窗口状态映射：alarm > out_of_band > ok，优先级从高到低。"""
+        # 目标频带内峰值超阈 → alarm
         in_band_amplitude = metrics.peak_amplitude
         if in_band_amplitude is not None and in_band_amplitude >= self.amplitude_threshold:
             return "alarm", "peak_above_threshold"
 
+        # 全频段峰值超阈但不在目标频带内 → out_of_band（提示带外异常）
         overall_freq_hz = metrics.overall_peak_freq_hz
         overall_amp = metrics.overall_peak_amplitude
         if (

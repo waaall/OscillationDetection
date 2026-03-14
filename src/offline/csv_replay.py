@@ -12,26 +12,29 @@ import pandas as pd
 from src.core.detection_pipeline import DetectionPipeline
 
 
-CSV_RESULT_COLUMNS = [
-    "window_id",
-    "status",
-    "reason",
-    "start_index",
-    "end_index",
-    "start_time",
-    "end_time",
-    "sample_count",
-    "sampling_rate_hz",
-    "dominant_freq_hz",
-    "dominant_period_s",
-    "peak_amplitude",
-    "overall_peak_freq_hz",
-    "overall_peak_amplitude",
-    "threshold",
-    "target_band_low_hz",
-    "target_band_high_hz",
-]
+# 离线 CSV 输出 schema，以及从 DetectionPipeline 结果中提取值的路径
+CSV_RESULT_FIELD_PATHS: dict[str, tuple[str, ...]] = {
+    "window_id": ("window", "window_id"),
+    "status": ("status",),
+    "reason": ("reason",),
+    "start_index": ("window", "start_index"),
+    "end_index": ("window", "end_index"),
+    "start_time": ("window", "start_time"),
+    "end_time": ("window", "end_time"),
+    "sample_count": ("window", "sample_count"),
+    "sampling_rate_hz": ("window", "sampling_rate_hz"),
+    "dominant_freq_hz": ("metrics", "dominant_freq_hz"),
+    "dominant_period_s": ("metrics", "dominant_period_s"),
+    "peak_amplitude": ("metrics", "peak_amplitude"),
+    "overall_peak_freq_hz": ("metrics", "overall_peak_freq_hz"),
+    "overall_peak_amplitude": ("metrics", "overall_peak_amplitude"),
+    "threshold": ("metrics", "threshold"),
+    "target_band_low_hz": ("meta", "target_band_low_hz"),
+    "target_band_high_hz": ("meta", "target_band_high_hz"),
+}
+CSV_RESULT_COLUMNS = list(CSV_RESULT_FIELD_PATHS)
 
+# 离线回放默认配置，可被 JSON 文件或构造函数参数覆盖
 DEFAULT_CONFIG: dict[str, Any] = {
     "input": {
         "csv_path": "csv-data/input.csv",
@@ -67,6 +70,7 @@ def _resolve_option(
     configured_value: Optional[Any],
     default_value: Any,
 ) -> Any:
+    """三级优先级：构造函数显式传参 > JSON 配置文件 > 硬编码默认值。"""
     if explicit_value is not None:
         return explicit_value
     if configured_value is not None:
@@ -74,8 +78,14 @@ def _resolve_option(
     return default_value
 
 
+def _extract_nested_value(data: dict[str, Any], path: Sequence[str]) -> Any:
+    value: Any = data
+    for key in path:
+        value = value[key]
+    return value
+
+
 class ConfigLoader:
-    """Load and create offline CSV replay configs."""
 
     @staticmethod
     def load(config_path: str) -> dict[str, Any]:
@@ -90,10 +100,7 @@ class ConfigLoader:
 
 class CsvReplay:
     """
-    Offline CSV replay runner for low-frequency oscillation detection.
-
-    The class owns file/config handling and delegates normalization + FFT-based
-    detection to DetectionPipeline.
+    本类负责文件读写和配置管理，检测算法调用 DetectionPipeline
     """
 
     def __init__(
@@ -160,7 +167,6 @@ class CsvReplay:
                 False,
             )
         )
-
         self.step_duration_s = float(
             _resolve_option(
                 step_duration_s,
@@ -168,7 +174,6 @@ class CsvReplay:
                 1.0,
             )
         )
-
         self.result_csv_path = output_cfg.get("result_csv_path")
         self.include_plot = bool(
             _resolve_option(
@@ -182,7 +187,6 @@ class CsvReplay:
             output_cfg.get("plot_dir"),
             "plots",
         )
-
         resolved_log_file = _resolve_option(
             log_file,
             logging_cfg.get("log_file"),
@@ -197,6 +201,7 @@ class CsvReplay:
         ).upper()
         self._setup_logger(resolved_log_file, resolved_log_level)
 
+        # 将离线层参数注入检测流程层；include_plot 映射为 include_spectrum
         self.pipeline = DetectionPipeline(
             target_freq_range_hz=self.target_freq_range_hz,
             window_duration_s=self.window_duration_s,
@@ -248,6 +253,7 @@ class CsvReplay:
         return pd.read_csv(resolved_csv_path)
 
     def analyze_dynamic(self, df: pd.DataFrame) -> pd.DataFrame:
+        """从 DataFrame 提取信号列和可选时间戳列，委托 DetectionPipeline 执行滑窗分析。"""
         if self.value_column not in df.columns:
             self.last_results = [self._invalid_result("empty_signal_after_cleanup")]
             return self.results_to_frame(self.last_results)
@@ -270,34 +276,17 @@ class CsvReplay:
         return self.results_to_frame(self.last_results)
 
     def results_to_frame(self, results: Sequence[dict[str, Any]]) -> pd.DataFrame:
+        """将 DetectionPipeline 返回的嵌套 dict 列表展平为标准输出列的 DataFrame。"""
         records: list[dict[str, Any]] = []
         for result in results:
-            window = result["window"]
-            metrics = result["metrics"]
-            meta = result["meta"]
             records.append(
                 {
-                    "window_id": window["window_id"],
-                    "status": result["status"],
-                    "reason": result["reason"],
-                    "start_index": window["start_index"],
-                    "end_index": window["end_index"],
-                    "start_time": window["start_time"],
-                    "end_time": window["end_time"],
-                    "sample_count": window["sample_count"],
-                    "sampling_rate_hz": window["sampling_rate_hz"],
-                    "dominant_freq_hz": metrics["dominant_freq_hz"],
-                    "dominant_period_s": metrics["dominant_period_s"],
-                    "peak_amplitude": metrics["peak_amplitude"],
-                    "overall_peak_freq_hz": metrics["overall_peak_freq_hz"],
-                    "overall_peak_amplitude": metrics["overall_peak_amplitude"],
-                    "threshold": metrics["threshold"],
-                    "target_band_low_hz": meta["target_band_low_hz"],
-                    "target_band_high_hz": meta["target_band_high_hz"],
+                    column: _extract_nested_value(result, path)
+                    for column, path in CSV_RESULT_FIELD_PATHS.items()
                 }
             )
 
-        return pd.DataFrame(records, columns=CSV_RESULT_COLUMNS)
+        return pd.DataFrame(records)
 
     def save_results(
         self,
@@ -312,6 +301,7 @@ class CsvReplay:
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
+        # 按标准列顺序写出，确保输出 schema 一致
         results_df = results_df.reindex(columns=CSV_RESULT_COLUMNS)
         results_df.to_csv(resolved_output_path, index=False)
         self.logger.info("saved results: %s", resolved_output_path)
@@ -324,6 +314,7 @@ class CsvReplay:
         if not self.include_plot or not self.last_results:
             return
 
+        # 延迟导入：仅在需要绘图时加载 matplotlib 依赖
         from src.offline.result_visualizer import ResultVisualizer
 
         resolved_plot_dir = Path(plot_dir or self.plot_dir)
@@ -337,6 +328,7 @@ class CsvReplay:
         )
         visualizer.plot_summary(str(resolved_plot_dir / "dominant_frequency.png"))
 
+        # debug 字段仅在 include_spectrum=True 时由 pipeline 填充
         if any("debug" in result for result in self.last_results):
             visualizer.plot_window_spectrum(
                 0,
@@ -348,6 +340,7 @@ class CsvReplay:
         input_csv: Optional[str] = None,
         output_csv: Optional[str] = None,
     ) -> pd.DataFrame:
+        """一键执行：读 CSV → 滑窗检测 → 保存结果 → 可选绘图。"""
         df = self.load_csv(input_csv)
         results_df = self.analyze_dynamic(df)
         self.save_results(results_df, output_csv)

@@ -7,7 +7,6 @@ import pandas as pd
 
 
 class ResultVisualizer:
-    """Offline visualization helper for replay results."""
 
     def __init__(
         self,
@@ -17,6 +16,7 @@ class ResultVisualizer:
         target_freq_range_hz: Optional[tuple[float, float]] = None,
     ) -> None:
         self.results_df = results_df.copy()
+        # raw_results 用于获取 debug 中的频谱数据（仅 include_spectrum=True 时存在）
         self.raw_results = list(raw_results or [])
         self.target_freq_range_hz = target_freq_range_hz
 
@@ -28,6 +28,7 @@ class ResultVisualizer:
             self.amplitude_threshold = 0.0
 
     def plot_summary(self, output_path: str) -> None:
+        """三合一总览图：主频趋势 / 峰值幅度+阈值线 / 状态时序。"""
         import matplotlib.pyplot as plt
 
         output = Path(output_path)
@@ -46,6 +47,7 @@ class ResultVisualizer:
         axes[0].set_ylabel("Dominant Freq (Hz)")
         axes[0].grid(True, alpha=0.3)
 
+        # 子图2：峰值幅度 + 报警阈值虚线
         axes[1].plot(
             x_axis,
             self.results_df["peak_amplitude"],
@@ -61,6 +63,7 @@ class ResultVisualizer:
         axes[1].set_ylabel("Peak Amp")
         axes[1].grid(True, alpha=0.3)
 
+        # 子图3：状态编码为数值后绘制阶梯图
         status_code = status_series.map(
             {
                 "ok": 0,
@@ -84,6 +87,7 @@ class ResultVisualizer:
         plt.close(fig)
 
     def plot_window_spectrum(self, window_id: int, output_path: str) -> None:
+        """单窗口频谱图，数据来自 pipeline 返回的 debug 字段，不重复做 FFT。"""
         import matplotlib.pyplot as plt
 
         if window_id >= len(self.raw_results):
@@ -104,6 +108,7 @@ class ResultVisualizer:
             color="#5b6c5d",
             linewidth=1.6,
         )
+        # 目标频带用半透明色带标注
         if self.target_freq_range_hz is not None:
             ax.axvspan(
                 self.target_freq_range_hz[0],
