@@ -9,6 +9,11 @@ from typing import Any, Optional, Sequence
 
 import pandas as pd
 
+if __package__ in {None, ""}:
+    project_root = Path(__file__).resolve().parents[2]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
 from src.core.detection_pipeline import DetectionPipeline
 
 
@@ -37,17 +42,17 @@ CSV_RESULT_COLUMNS = list(CSV_RESULT_FIELD_PATHS)
 # 离线回放默认配置，可被 JSON 文件或构造函数参数覆盖
 DEFAULT_CONFIG: dict[str, Any] = {
     "input": {
-        "csv_path": "csv-data/input.csv",
+        "csv_path": "csv-data/test.csv",
         "time_column": "timestamp",
-        "value_column": "signal",
-        "timestamp_format": "%Y-%m-%d %H:%M:%S.%f",
+        "value_column": "UNIT1.YCKYQYQJCKCY",
+        "timestamp_format": "%Y-%m-%d %H:%M:%S",
         "has_timestamp": True,
     },
     "analysis": {
         "sampling_rate_hz": 1.0,
-        "target_freq_range_hz": [0.0167, 0.2],
-        "window_duration_s": 180.0,
-        "amplitude_threshold": 0.5,
+        "target_freq_range_hz": [0.012, 0.2],
+        "window_duration_s": 300.0,
+        "amplitude_threshold": 0.03,
         "allow_resample": False,
     },
     "replay": {
@@ -57,6 +62,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "result_csv_path": "csv-data/output.csv",
         "include_plot": True,
         "plot_dir": "plots",
+        "window_plot_stride": 0,
     },
     "logging": {
         "log_file": "./log/csv_replay.log",
@@ -115,6 +121,7 @@ class CsvReplay:
         step_duration_s: Optional[float] = None,
         include_plot: Optional[bool] = None,
         plot_dir: Optional[str] = None,
+        window_plot_stride: Optional[int] = None,
         log_file: Optional[str] = None,
         log_level: Optional[str] = None,
     ) -> None:
@@ -187,6 +194,17 @@ class CsvReplay:
             output_cfg.get("plot_dir"),
             "plots",
         )
+        resolved_window_plot_stride = _resolve_option(
+            window_plot_stride,
+            output_cfg.get("window_plot_stride"),
+            0,
+        )
+        if resolved_window_plot_stride is None:
+            self.window_plot_stride = 0
+        else:
+            self.window_plot_stride = int(resolved_window_plot_stride)
+        if self.window_plot_stride < 0:
+            raise ValueError("window_plot_stride must be >= 0")
         resolved_log_file = _resolve_option(
             log_file,
             logging_cfg.get("log_file"),
@@ -329,11 +347,28 @@ class CsvReplay:
         visualizer.plot_summary(str(resolved_plot_dir / "dominant_frequency.png"))
 
         # debug 字段仅在 include_spectrum=True 时由 pipeline 填充
-        if any("debug" in result for result in self.last_results):
+        window_plot_ids = self._collect_window_plot_ids()
+        for window_id in window_plot_ids:
             visualizer.plot_window_spectrum(
-                0,
-                str(resolved_plot_dir / "window_0_spectrum.png"),
+                window_id,
+                str(resolved_plot_dir / f"window_{window_id}_spectrum.png"),
             )
+
+    def _collect_window_plot_ids(self) -> list[int]:
+        debug_window_ids = [
+            result["window"]["window_id"]
+            for result in self.last_results
+            if "debug" in result
+        ]
+        if not debug_window_ids:
+            return []
+        if self.window_plot_stride == 0:
+            return [debug_window_ids[0]]
+        return [
+            window_id
+            for window_id in debug_window_ids
+            if window_id % self.window_plot_stride == 0
+        ]
 
     def run_pipeline(
         self,

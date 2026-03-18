@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.offline.csv_replay import CsvReplay  # noqa: E402
+from src.offline.csv_replay import DEFAULT_CONFIG, ConfigLoader, CsvReplay  # noqa: E402
 
 
 def _write_timestamp_csv(path: Path, *, sample_count: int = 120) -> None:
@@ -26,6 +26,24 @@ def _write_timestamp_csv(path: Path, *, sample_count: int = 120) -> None:
             "signal": signal,
         }
     ).to_csv(path, index=False)
+
+
+def test_default_config_matches_checked_in_sample_data():
+    config = ConfigLoader.load(str(PROJECT_ROOT / "src/offline/csv_replay.default.json"))
+    input_cfg = config["input"]
+    csv_path = PROJECT_ROOT / input_cfg["csv_path"]
+
+    assert csv_path.exists()
+
+    df = pd.read_csv(csv_path)
+    assert input_cfg["value_column"] in df.columns
+    if input_cfg["has_timestamp"]:
+        assert input_cfg["time_column"] in df.columns
+
+
+def test_checked_in_default_json_matches_in_code_defaults():
+    config = ConfigLoader.load(str(PROJECT_ROOT / "src/offline/csv_replay.default.json"))
+    assert config == DEFAULT_CONFIG
 
 
 def test_csv_replay_outputs_all_windows(tmp_path: Path):

@@ -1,25 +1,26 @@
 {
   "input": {
-    "csv_path": "csv-data/input.csv",
+    "csv_path": "csv-data/test-ok.regular.csv",
     "time_column": "timestamp",
-    "value_column": "signal",
-    "timestamp_format": "%Y-%m-%d %H:%M:%S.%f",
+    "value_column": "UNIT1.YCKYQYQJCKCY",
+    "timestamp_format": "%Y-%m-%d %H:%M:%S",
     "has_timestamp": true
   },
   "analysis": {
     "sampling_rate_hz": 1.0,
-    "target_freq_range_hz": [0.0167, 0.2],
-    "window_duration_s": 180.0,
-    "amplitude_threshold": 0.5,
+    "target_freq_range_hz": [0.012, 0.1],
+    "window_duration_s": 300.0,
+    "amplitude_threshold": 0.02,
     "allow_resample": false
   },
   "replay": {
-    "step_duration_s": 1.0
+    "step_duration_s": 10.0
   },
   "output": {
     "result_csv_path": "csv-data/output.csv",
     "include_plot": true,
-    "plot_dir": "plots"
+    "plot_dir": "plots",
+    "window_plot_stride": 100
   },
   "logging": {
     "log_file": "./log/csv_replay.log",

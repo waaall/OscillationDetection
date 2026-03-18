@@ -18,7 +18,7 @@ class PreparedSignal:
 
 
 class DetectionPipeline:
-    """Input normalization + windowing + status mapping for oscillation detection."""
+    """信号输入规范化、窗口化处理、状态映射的振荡检测管道。"""
 
     def __init__(
         self,
@@ -54,8 +54,7 @@ class DetectionPipeline:
         min_window_duration_s = 3.0 / low_hz
         if self.window_duration_s < min_window_duration_s:
             raise ValueError(
-                "window_duration_s must cover at least three periods of the "
-                "slowest target frequency"
+                "window_duration_s 必须覆盖目标最低频率的至少三个周期"
             )
         if self.amplitude_threshold < 0:
             raise ValueError("amplitude_threshold must be non-negative")
@@ -139,13 +138,18 @@ class DetectionPipeline:
             range(0, prepared.values.size - window_samples + 1, step_samples)
         ):
             end_index = start_index + window_samples - 1
-            metrics = analyzer.analyze(
-                prepared.values[start_index: start_index + window_samples]
-            )
+            window_values = prepared.values[start_index: start_index + window_samples]
+            metrics = analyzer.analyze(window_values)
             status, reason = self._classify_window(metrics)
             debug = None
             if self.include_spectrum:
+                window_time_s = (
+                    np.arange(window_values.size, dtype=float)
+                    / prepared.sampling_rate_hz
+                )
                 debug = {
+                    "window_time_s": window_time_s,
+                    "window_values": window_values.copy(),
                     "spectrum_freqs": metrics.spectrum_freqs,
                     "spectrum_amps": metrics.spectrum_amps,
                 }
@@ -211,7 +215,7 @@ class DetectionPipeline:
             # 重复时间戳：允许重采样时取均值合并，否则报错
             if records["timestamp"].duplicated().any():
                 if not self.allow_resample:
-                    raise ValueError("resample_failed")
+                    raise ValueError("duplicate_timestamp_without_resample")
                 records = (
                     records.groupby("timestamp", as_index=False)["value"]
                     .mean()
@@ -233,12 +237,21 @@ class DetectionPipeline:
             self._validate_band_against_rate(resolved_rate)
 
             # 均值误差 >5% 或变异系数 >10% 视为采样不均匀，需要重采样
-            needs_resample = (
+            has_rate_mismatch = (
                 relative_error is not None and relative_error > 0.05
-            ) or irregular
+            )
+            needs_resample = has_rate_mismatch or irregular
             if needs_resample:
                 if not self.allow_resample:
-                    raise ValueError("resample_failed")
+                    if has_rate_mismatch and irregular:
+                        raise ValueError(
+                            "sampling_rate_mismatch_and_irregular_without_resample"
+                        )
+                    if has_rate_mismatch:
+                        raise ValueError(
+                            "sampling_rate_mismatch_without_resample"
+                        )
+                    raise ValueError("irregular_sampling_without_resample")
                 records = self._resample_records(records, resolved_rate)
 
             parsed_timestamps = records["timestamp"]

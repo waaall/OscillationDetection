@@ -27,6 +27,41 @@ class ResultVisualizer:
         else:
             self.amplitude_threshold = 0.0
 
+    @staticmethod
+    def _plot_marker(
+        ax: Any,
+        *,
+        freq_hz: Optional[float],
+        amplitude: Optional[float],
+        color: str,
+        label: str,
+        text_offset: tuple[float, float] = (6.0, 6.0),
+    ) -> None:
+        if freq_hz is None or amplitude is None:
+            return
+        ax.scatter(
+            [freq_hz],
+            [amplitude],
+            color=color,
+            s=28,
+            zorder=3,
+            label=label,
+        )
+        ax.annotate(
+            f"({freq_hz:.4g}Hz, {amplitude:.4g})",
+            xy=(freq_hz, amplitude),
+            xytext=text_offset,
+            textcoords="offset points",
+            color=color,
+            fontsize=9,
+            bbox={
+                "boxstyle": "round,pad=0.2",
+                "facecolor": "white",
+                "edgecolor": color,
+                "alpha": 0.85,
+            },
+        )
+
     def plot_summary(self, output_path: str) -> None:
         """三合一总览图：主频趋势 / 峰值幅度+阈值线 / 状态时序。"""
         import matplotlib.pyplot as plt
@@ -87,7 +122,7 @@ class ResultVisualizer:
         plt.close(fig)
 
     def plot_window_spectrum(self, window_id: int, output_path: str) -> None:
-        """单窗口频谱图，数据来自 pipeline 返回的 debug 字段，不重复做 FFT。"""
+        """单窗口时域+频域图，数据来自 pipeline 返回的 debug 字段，不重复做 FFT。"""
         import matplotlib.pyplot as plt
 
         if window_id >= len(self.raw_results):
@@ -101,8 +136,25 @@ class ResultVisualizer:
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
 
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(
+        fig, axes = plt.subplots(
+            2,
+            1,
+            figsize=(10, 7),
+            gridspec_kw={"height_ratios": [1.0, 1.2]},
+        )
+        signal_ax, spectrum_ax = axes
+
+        signal_ax.plot(
+            debug["window_time_s"],
+            debug["window_values"],
+            color="#1b6ca8",
+            linewidth=1.2,
+        )
+        signal_ax.set_ylabel("Signal")
+        signal_ax.set_xlabel("Time in Window (s)")
+        signal_ax.grid(True, alpha=0.3)
+
+        spectrum_ax.plot(
             debug["spectrum_freqs"],
             debug["spectrum_amps"],
             color="#5b6c5d",
@@ -110,15 +162,47 @@ class ResultVisualizer:
         )
         # 目标频带用半透明色带标注
         if self.target_freq_range_hz is not None:
-            ax.axvspan(
+            spectrum_ax.axvspan(
                 self.target_freq_range_hz[0],
                 self.target_freq_range_hz[1],
                 color="#f3d9b1",
                 alpha=0.35,
             )
-        ax.set_xlabel("Frequency (Hz)")
-        ax.set_ylabel("Amplitude")
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
+
+        metrics = raw_result["metrics"]
+        self._plot_marker(
+            spectrum_ax,
+            freq_hz=metrics.get("overall_peak_freq_hz"),
+            amplitude=metrics.get("overall_peak_amplitude"),
+            color="#c84c09",
+            label="Overall Peak",
+            text_offset=(8.0, 8.0),
+        )
+        self._plot_marker(
+            spectrum_ax,
+            freq_hz=metrics.get("dominant_freq_hz"),
+            amplitude=metrics.get("peak_amplitude"),
+            color="#8f2d56",
+            label="Band Peak",
+            text_offset=(8.0, -18.0),
+        )
+        if spectrum_ax.get_legend_handles_labels()[0]:
+            spectrum_ax.legend(loc="upper right")
+
+        spectrum_ax.set_xlabel("Frequency (Hz)")
+        spectrum_ax.set_ylabel("Amplitude")
+        spectrum_ax.grid(True, alpha=0.3)
+
+        start_time = raw_result["window"].get("start_time")
+        end_time = raw_result["window"].get("end_time")
+        layout_rect = None
+        if start_time is not None and end_time is not None:
+            fig.suptitle(f"Window {window_id}: {start_time} to {end_time}")
+            layout_rect = [0.0, 0.0, 1.0, 0.97]
+
+        if layout_rect is None:
+            fig.tight_layout()
+        else:
+            fig.tight_layout(rect=layout_rect)
         fig.savefig(output, dpi=200, bbox_inches="tight")
         plt.close(fig)

@@ -71,7 +71,7 @@ def test_out_of_band_when_strong_peak_is_outside_target_band():
 
 
 def test_window_duration_validation():
-    with pytest.raises(ValueError, match="three periods"):
+    with pytest.raises(ValueError, match="三个周期"):
         DetectionPipeline(
             target_freq_range_hz=(0.5, 1.0),
             window_duration_s=5.0,
@@ -141,6 +141,7 @@ def test_invalid_input_on_irregular_sampling_without_resample():
 
     assert len(results) == 1
     assert results[0]["status"] == "invalid_input"
+    assert results[0]["reason"] == "irregular_sampling_without_resample"
 
 
 def test_insufficient_data_returns_single_result():
